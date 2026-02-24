@@ -33,6 +33,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.ai:spring-ai-tika-document-reader")
+    implementation("org.apache.pdfbox:pdfbox:3.0.3")
     implementation("com.github.jai-imageio:jai-imageio-jpeg2000:1.4.0")
     implementation("software.amazon.awssdk:s3:2.25.27")
     implementation("org.liquibase:liquibase-core")

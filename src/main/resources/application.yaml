@@ -49,6 +49,7 @@ s3:
 
 it-top-ai:
   base-url: ${IT_TOP_AI_BASE_URL:http://localhost:8080}
+  mistral-model: ${MISTRAL_MODEL:mistral-large-latest}
 
 logging:
   level:

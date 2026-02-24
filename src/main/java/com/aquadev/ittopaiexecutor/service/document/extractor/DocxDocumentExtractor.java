@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
 @Component
 public class DocxDocumentExtractor implements DocumentExtractor {
 
-    private static final Set<String> SUPPORTED_MIME_TYPES = Set.of("docx, doc");
+    private static final Set<String> SUPPORTED_MIME_TYPES = Set.of("docx", "doc");
 
     private static final String PROMPT_TEMPLATE = """
             Document text:

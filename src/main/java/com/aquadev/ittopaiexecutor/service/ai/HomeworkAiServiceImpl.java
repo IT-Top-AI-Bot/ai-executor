@@ -4,19 +4,17 @@ import com.aquadev.ittopaiexecutor.dto.SolvedHomework;
 import com.aquadev.ittopaiexecutor.dto.TokenUsage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
 
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class HomeworkAiServiceImpl implements HomeworkAiService {
 
-    private final ChatModel chatModel;
+    private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
 
     private static final String SYSTEM_PROMPT = """
@@ -50,25 +48,51 @@ public class HomeworkAiServiceImpl implements HomeworkAiService {
         }
         """;
 
-    private static final String USER_PROMPT_TEXT_ONLY = """
+    private static final String USER_PROMPT = """
         Выполни практическое задание:
 
         {homework}
         """;
 
-    private static final String USER_PROMPT_WITH_IMAGES = """
-        Выполни практическое задание.
-
-        ТЕКСТ ЗАДАНИЯ:
-        {homework}
-
-        ВИЗУАЛЬНЫЕ МАТЕРИАЛЫ:
-        К заданию прикреплено {count} изображени(е/я). Они показывают, как должен выглядеть результат,
-        или содержат дополнительные условия. Изучи их внимательно и воспроизведи максимально точно.
-        """;
-
     @Override
     public SolvedHomework solve(String homeworkContext, TokenUsage tokenUsage, String systemPrompt) {
+        String effectiveSystemPrompt = (systemPrompt != null && !systemPrompt.isBlank())
+                ? systemPrompt
+                : SYSTEM_PROMPT;
 
+        String userMessage = USER_PROMPT.replace("{homework}", homeworkContext);
+
+        ChatResponse response = chatClient.prompt()
+                .system(effectiveSystemPrompt)
+                .user(userMessage)
+                .call()
+                .chatResponse();
+
+        tokenUsage.addText(response.getMetadata().getUsage());
+
+        String raw = response.getResult().getOutput().getText();
+        log.debug("Raw AI response length={}", raw != null ? raw.length() : 0);
+
+        String json = stripMarkdownFence(raw);
+
+        try {
+            return objectMapper.readValue(json, SolvedHomework.class);
+        } catch (Exception e) {
+            log.error("Failed to parse AI response as JSON: {}", raw, e);
+            throw new RuntimeException("AI returned invalid JSON response", e);
+        }
+    }
+
+    private String stripMarkdownFence(String text) {
+        if (text == null) return "{}";
+        String trimmed = text.strip();
+        if (trimmed.startsWith("```")) {
+            int firstNewline = trimmed.indexOf('\n');
+            int lastFence = trimmed.lastIndexOf("```");
+            if (firstNewline > 0 && lastFence > firstNewline) {
+                return trimmed.substring(firstNewline + 1, lastFence).strip();
+            }
+        }
+        return trimmed;
     }
 }
