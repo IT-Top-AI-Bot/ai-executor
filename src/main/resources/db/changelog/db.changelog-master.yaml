@@ -1,0 +1,4 @@
+databaseChangeLog:
+
+  - include:
+      file: db/changelog/master/changeset/001-add-subject-prompt.yaml

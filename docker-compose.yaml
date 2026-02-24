@@ -1,0 +1,53 @@
+services:
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: rustfs
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - RUSTFS_VOLUMES=/data
+      - RUSTFS_ADDRESS=0.0.0.0:9000
+      - RUSTFS_CONSOLE_ADDRESS=0.0.0.0:9001
+      - RUSTFS_CONSOLE_ENABLE=true
+
+      - RUSTFS_ACCESS_KEY=${RUSTFS_ACCESS_KEY:-rustfsadmin}
+      - RUSTFS_SECRET_KEY=${RUSTFS_SECRET_KEY:-rustfsadmin}
+
+      - RUSTFS_OBS_LOGGER_LEVEL=info
+    volumes:
+      - rustfs_data:/data
+      - rustfs_logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "sh", "-c", "wget -q --spider http://127.0.0.1:9000/health || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  postgres:
+    image: postgres:18.1-alpine
+    restart: "no"
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-it_top_executor}
+    healthcheck:
+      test: pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+volumes:
+  rustfs_data:
+  rustfs_logs:
+  postgres_data:

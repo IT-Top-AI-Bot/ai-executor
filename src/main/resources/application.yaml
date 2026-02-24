@@ -1,0 +1,58 @@
+spring:
+  application:
+    name: it-top-ai-executor
+
+  ai:
+    mistralai:
+      api-key: ${MISTRALAI_API_KEY}
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/it_top_executor}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  config:
+    import: optional:file:.env[.properties]
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:29092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      group-id: it-top-ai-executor
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      max-poll-records: 1
+    listener:
+      ack-mode: manual
+
+server:
+  port: 8082
+
+kafka:
+  homework-execution-topic: homework-execution
+  homework-result-topic: homework-result
+
+s3:
+  endpoint: ${S3_ENDPOINT}
+  region: ${S3_REGION:us-east-1}
+  access-key: ${RUSTFS_ACCESS_KEY}
+  secret-key: ${RUSTFS_SECRET_KEY}
+  bucket: ${S3_BUCKET:homeworks-solutions}
+
+it-top-ai:
+  base-url: ${IT_TOP_AI_BASE_URL:http://localhost:8080}
+
+logging:
+  level:
+    org.springframework.kafka: DEBUG
+    org.apache.kafka: INFO
+    com.aquadev: DEBUG
+    software.amazon.awssdk: DEBUG

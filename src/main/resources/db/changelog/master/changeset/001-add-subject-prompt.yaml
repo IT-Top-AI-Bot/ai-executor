@@ -1,0 +1,30 @@
+databaseChangeLog:
+  - changeSet:
+      id: 1771589500154-1
+      author: aqua
+      objectQuotingStrategy: QUOTE_ONLY_RESERVED_WORDS
+      changes:
+        - createTable:
+            columns:
+              - column:
+                  constraints:
+                    nullable: false
+                    primaryKey: true
+                    primaryKeyName: pk_subject_prompt
+                  name: spec_id
+                  type: BIGINT
+              - column:
+                  constraints:
+                    nullable: false
+                  name: name_spec
+                  type: VARCHAR(255)
+              - column:
+                  constraints:
+                    nullable: false
+                  name: system_prompt
+                  type: TEXT
+              - column:
+                  name: vision_prompt
+                  type: TEXT
+            tableName: subject_prompt
+
