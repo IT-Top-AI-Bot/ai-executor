@@ -3,8 +3,10 @@ package com.aquadev.ittopaiexecutor.config.kafka;
 import com.aquadev.ittopaiexecutor.dto.kafka.HomeworkExecutionEvent;
 import com.aquadev.ittopaiexecutor.dto.kafka.HomeworkExecutionResultEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringSerializer;
@@ -30,12 +32,17 @@ import org.springframework.util.backoff.FixedBackOff;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @EnableKafka
 @Configuration
 @EnableConfigurationProperties(KafkaTopicProperties.class)
 public class KafkaConfig {
+
+    private static final String HDR_CORRELATION_ID = "correlationId";
+    private static final String HDR_TRACEPARENT = "traceparent";
+    private static final int MAX_ERROR_MESSAGE_LENGTH = 500;
 
     @Bean
     public ConsumerFactory<String, HomeworkExecutionEvent> homeworkExecutionConsumerFactory(
@@ -57,14 +64,16 @@ public class KafkaConfig {
     public ConcurrentKafkaListenerContainerFactory<String, HomeworkExecutionEvent>
     homeworkExecutionKafkaListenerContainerFactory(
             ConsumerFactory<String, HomeworkExecutionEvent> homeworkExecutionConsumerFactory,
-            KafkaTemplate<String, Object> kafkaTemplate
+            KafkaTemplate<String, Object> kafkaTemplate,
+            KafkaTemplate<String, HomeworkExecutionResultEvent> resultKafkaTemplate,
+            KafkaTopicProperties kafkaTopicProperties
     ) {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, HomeworkExecutionEvent>();
         factory.setConsumerFactory(homeworkExecutionConsumerFactory);
         factory.setConcurrency(1);
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
 
-        var recoverer = new DeadLetterPublishingRecoverer(
+        var deadLetterRecoverer = new DeadLetterPublishingRecoverer(
                 kafkaTemplate,
                 (rec, ex) -> {
                     log.error("Sending to DLQ topic={} partition={} offset={}: {}",
@@ -73,7 +82,16 @@ public class KafkaConfig {
                 }
         );
 
-        var errorHandler = new DefaultErrorHandler(recoverer, new FixedBackOff(1000, 3));
+        var errorHandler = new DefaultErrorHandler((record, ex) -> {
+            publishFailedResult(record, ex, resultKafkaTemplate, kafkaTopicProperties);
+            deadLetterRecoverer.accept(record, ex);
+        }, new FixedBackOff(1000, 3));
+
+        errorHandler.setCommitRecovered(true);
+        errorHandler.setRetryListeners((record, ex, deliveryAttempt) ->
+                log.warn("Retrying topic={} partition={} offset={} attempt={} due to {}",
+                        record.topic(), record.partition(), record.offset(), deliveryAttempt, ex.toString()));
+
         errorHandler.addNotRetryableExceptions(IllegalArgumentException.class);
         errorHandler.addNotRetryableExceptions(DeserializationException.class);
 
@@ -119,5 +137,56 @@ public class KafkaConfig {
     @Bean
     public KafkaTemplate<String, Object> kafkaTemplate(ProducerFactory<String, Object> dlqProducerFactory) {
         return new KafkaTemplate<>(dlqProducerFactory);
+    }
+
+    private void publishFailedResult(
+            ConsumerRecord<?, ?> record,
+            Exception ex,
+            KafkaTemplate<String, HomeworkExecutionResultEvent> resultKafkaTemplate,
+            KafkaTopicProperties kafkaTopicProperties
+    ) {
+        if (!(record.value() instanceof HomeworkExecutionEvent event) || event.id() == null) {
+            log.warn("Cannot publish FAILED result event: invalid payload for topic={} partition={} offset={}",
+                    record.topic(), record.partition(), record.offset());
+            return;
+        }
+
+        String errorMessage = buildErrorMessage(ex);
+        HomeworkExecutionResultEvent failedEvent = HomeworkExecutionResultEvent.failed(event.id(), errorMessage);
+
+        ProducerRecord<String, HomeworkExecutionResultEvent> failedRecord =
+                new ProducerRecord<>(kafkaTopicProperties.homeworkResultTopic(), event.id().toString(), failedEvent);
+
+        copyHeaderIfPresent(record, failedRecord, HDR_CORRELATION_ID);
+        copyHeaderIfPresent(record, failedRecord, HDR_TRACEPARENT);
+
+        try {
+            var metadata = resultKafkaTemplate.send(failedRecord).get(10, TimeUnit.SECONDS).getRecordMetadata();
+            log.info("FAILED result sent: executionId={}, topic={}, partition={}, offset={}",
+                    event.id(), metadata.topic(), metadata.partition(), metadata.offset());
+        } catch (Exception sendEx) {
+            log.error("Could not send FAILED result event for executionId={}", event.id(), sendEx);
+        }
+    }
+
+    private void copyHeaderIfPresent(
+            ConsumerRecord<?, ?> source,
+            ProducerRecord<String, HomeworkExecutionResultEvent> target,
+            String headerName
+    ) {
+        var header = source.headers().lastHeader(headerName);
+        if (header != null && header.value() != null) {
+            target.headers().add(headerName, header.value());
+        }
+    }
+
+    private String buildErrorMessage(Exception ex) {
+        String message = "%s: %s".formatted(
+                ex.getClass().getSimpleName(),
+                ex.getMessage() == null ? "n/a" : ex.getMessage());
+        if (message.length() <= MAX_ERROR_MESSAGE_LENGTH) {
+            return message;
+        }
+        return message.substring(0, MAX_ERROR_MESSAGE_LENGTH) + "... [truncated]";
     }
 }

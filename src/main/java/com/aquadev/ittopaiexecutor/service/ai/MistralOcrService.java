@@ -31,20 +31,17 @@ public class MistralOcrService {
                 "https://api.mistral.ai", apiKey, restClientBuilder);
     }
 
-    /**
-     * Отправляет PDF-байты в Mistral OCR и возвращает Markdown-текст всех страниц.
-     */
     public String extractText(byte[] pdfBytes) {
         String dataUrl = "data:application/pdf;base64," + Base64.getEncoder().encodeToString(pdfBytes);
 
         OCRRequest request = new OCRRequest(
                 OCRModel.MISTRAL_OCR_LATEST.getValue(),
-                null,                          // id — не обязателен
-                new DocumentURLChunk(dataUrl), // PDF как data-URI
-                null,                          // pages — все страницы
-                null,                          // includeImageBase64
-                null,                          // imageLimit
-                null                           // imageMinSize
+                null,
+                new DocumentURLChunk(dataUrl),
+                null,
+                null,
+                null,
+                null
         );
 
         log.info("Calling Mistral OCR API: model={}, pdfSize={} bytes",
