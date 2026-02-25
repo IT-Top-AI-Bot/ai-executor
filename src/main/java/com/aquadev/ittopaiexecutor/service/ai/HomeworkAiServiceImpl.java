@@ -78,8 +78,11 @@ public class HomeworkAiServiceImpl implements HomeworkAiService {
         try {
             return objectMapper.readValue(json, SolvedHomework.class);
         } catch (Exception e) {
-            log.error("Failed to parse AI response as JSON: {}", raw, e);
-            throw new RuntimeException("AI returned invalid JSON response", e);
+            // НЕ прокидываем e как cause — Jackson кладёт весь raw-ответ (~1 MB) в getMessage(),
+            // что приводит к RecordTooLargeException при отправке FAILED-события в Kafka.
+            log.error("Failed to parse AI response as JSON (jsonLength={}): {}", json.length(), e.getMessage());
+            throw new RuntimeException("AI returned invalid JSON. jsonLength=%d, parseError=%s"
+                    .formatted(json.length(), e.getClass().getSimpleName()));
         }
     }
 

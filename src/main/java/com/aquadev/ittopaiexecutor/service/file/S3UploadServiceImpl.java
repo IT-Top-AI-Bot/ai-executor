@@ -7,6 +7,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.BucketAlreadyExistsException;
+import software.amazon.awssdk.services.s3.model.BucketAlreadyOwnedByYouException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 import java.nio.file.Path;
@@ -26,8 +28,6 @@ public class S3UploadServiceImpl implements S3UploadService {
         String contentType = ContentTypeUtils.forFilename(file.getFileName().toString());
         log.info("Uploading file to S3: path={}, key={}, contentType={}", file.toAbsolutePath(), s3Key, contentType);
 
-        ensureBucketExists();
-
         s3Client.putObject(
                 PutObjectRequest.builder()
                         .bucket(bucket)
@@ -45,8 +45,6 @@ public class S3UploadServiceImpl implements S3UploadService {
     public String upload(byte[] content, String s3Key, String contentType) {
         log.info("Uploading bytes to S3: key={}, size={} bytes, contentType={}", s3Key, content.length, contentType);
 
-        ensureBucketExists();
-
         s3Client.putObject(
                 PutObjectRequest.builder()
                         .bucket(bucket)
@@ -58,9 +56,5 @@ public class S3UploadServiceImpl implements S3UploadService {
 
         log.info("Uploaded to S3: bucket={}, key={}", bucket, s3Key);
         return s3Key;
-    }
-
-    private void ensureBucketExists() {
-        s3Client.createBucket(b -> b.bucket(bucket));
     }
 }

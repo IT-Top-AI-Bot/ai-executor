@@ -1,6 +1,8 @@
 package com.aquadev.ittopaiexecutor.service.document.extractor;
 
 import com.aquadev.ittopaiexecutor.dto.ExtractedDocument;
+import com.aquadev.ittopaiexecutor.service.ai.MistralOcrService;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -10,71 +12,59 @@ import org.apache.pdfbox.pdmodel.PDEmbeddedFilesNameTreeNode;
 import org.apache.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification;
 import org.apache.pdfbox.pdmodel.common.filespecification.PDEmbeddedFile;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.content.Media;
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
-import org.springframework.util.MimeType;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * Извлекает содержимое PDF двумя способами:
+ * 1. Mistral OCR API (mistral-ocr-latest) — текст, таблицы, изображения, макеты
+ * 2. PDFBox — вложенные .txt-файлы из аннотаций PDF (edge case)
+ */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class PdfDocumentExtractor implements DocumentExtractor {
 
-    private static final Set<String> SUPPORTED_MIME_TYPES = Set.of("pdf");
+    private static final Set<String> SUPPORTED = Set.of("pdf");
+
+    private final MistralOcrService mistralOcrService;
 
     @Override
     public Set<String> supportedMimeTypes() {
-        return SUPPORTED_MIME_TYPES;
+        return SUPPORTED;
     }
 
     @Override
     public ExtractedDocument extract(byte[] content, String filename, ChatClient chatClient) {
-        Resource resource = new ByteArrayResource(content) {
-            @Override
-            public String getFilename() {
-                return filename;
-            }
-        };
-
-        String text = chatClient.prompt()
-                .user(u -> u
-                        .text("Extract and return the complete text content of this document. " +
-                                "If there are images or screenshots — describe their content inline.")
-                        .media(new Media(new MimeType("application", "pdf"), resource))
-                )
-                .call()
-                .content();
-
+        String ocrText      = mistralOcrService.extractText(content);
         String embeddedText = extractEmbeddedTxtFiles(content);
-        if (!embeddedText.isBlank()) {
-            text = text + "\n\n" + embeddedText;
-        }
 
-        return new ExtractedDocument(text, Map.of("source", filename));
+        String fullText = embeddedText.isBlank()
+                ? ocrText
+                : ocrText + "\n\n[Вложенные файлы]\n" + embeddedText;
+
+        log.debug("PDF extracted via OCR: filename={}, totalLength={}", filename, fullText.length());
+        return new ExtractedDocument(fullText.trim(), Map.of("source", filename));
     }
+
+    // ─── Embedded .txt files (PDFBox) ─────────────────────────────────────────
 
     private String extractEmbeddedTxtFiles(byte[] pdfBytes) {
         StringBuilder sb = new StringBuilder();
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
             PDDocumentCatalog catalog = doc.getDocumentCatalog();
             PDDocumentNameDictionary names = catalog.getNames();
-            if (names == null) {
-                return "";
-            }
-            PDEmbeddedFilesNameTreeNode embeddedFilesTree = names.getEmbeddedFiles();
-            if (embeddedFilesTree == null) {
-                return "";
-            }
+            if (names == null) return "";
 
-            Map<String, PDComplexFileSpecification> fileMap = embeddedFilesTree.getNames();
-            if (fileMap == null || fileMap.isEmpty()) {
-                return "";
-            }
+            PDEmbeddedFilesNameTreeNode tree = names.getEmbeddedFiles();
+            if (tree == null) return "";
+
+            Map<String, PDComplexFileSpecification> fileMap = tree.getNames();
+            if (fileMap == null || fileMap.isEmpty()) return "";
 
             for (Map.Entry<String, PDComplexFileSpecification> entry : fileMap.entrySet()) {
                 String embName = entry.getKey();

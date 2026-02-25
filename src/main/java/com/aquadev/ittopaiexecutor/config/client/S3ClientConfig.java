@@ -22,9 +22,6 @@ public class S3ClientConfig {
     @Value("${s3.secret-key}")
     private String secretKey;
 
-    @Value("${s3.region:us-east-1}")
-    private String region;
-
     @Bean
     public S3Client s3Client() {
         return S3Client.builder()

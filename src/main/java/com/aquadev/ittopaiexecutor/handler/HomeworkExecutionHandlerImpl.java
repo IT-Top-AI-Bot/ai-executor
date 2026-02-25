@@ -59,9 +59,14 @@ public class HomeworkExecutionHandlerImpl implements HomeworkExecutionHandler {
         return "%d-%s-%s".formatted(event.homeworkId(), event.id(), filename);
     }
 
+    private static final int MAX_ERROR_MESSAGE_LENGTH = 500;
+
     private void trySendFailed(HomeworkExecutionEvent event, String errorMessage) {
+        String truncated = errorMessage != null && errorMessage.length() > MAX_ERROR_MESSAGE_LENGTH
+                ? errorMessage.substring(0, MAX_ERROR_MESSAGE_LENGTH) + "... [truncated]"
+                : errorMessage;
         try {
-            homeworkResultProducer.sendFailed(event.id(), errorMessage, null, null);
+            homeworkResultProducer.sendFailed(event.id(), truncated, null, null);
             log.info("FAILED event sent for executionId={}", event.id());
         } catch (Exception ex) {
             log.error("Could not send FAILED event for executionId={}: {}", event.id(), ex.getMessage(), ex);
