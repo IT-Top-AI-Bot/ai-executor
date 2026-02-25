@@ -8,40 +8,30 @@ import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.springframework.stereotype.Service;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 
 @Slf4j
 @Service
 public class FileGenerationServiceImpl implements FileGenerationService {
 
-    private static final Path OUTPUT_DIR = Path.of("generated-files");
-
     @Override
-    public Path generateFile(SolvedHomework solved) {
-        try {
-            Files.createDirectories(OUTPUT_DIR);
-            Path file = OUTPUT_DIR.resolve(solved.filename() + "." + solved.extension());
-
-            if ("docx".equalsIgnoreCase(solved.extension())) {
-                writeDocx(solved.content(), file);
-            } else {
-                Files.writeString(file, solved.content());
-            }
-
-            log.info("Generated file: {}", file.toAbsolutePath());
-            return file;
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to write generated file", e);
+    public byte[] generateFile(SolvedHomework solved) {
+        byte[] bytes;
+        if ("docx".equalsIgnoreCase(solved.extension())) {
+            bytes = generateDocx(solved.content());
+        } else {
+            bytes = solved.content().getBytes(StandardCharsets.UTF_8);
         }
+        log.info("Generated {} bytes for {}.{}", bytes.length, solved.filename(), solved.extension());
+        return bytes;
     }
 
-    private void writeDocx(String content, Path output) throws IOException {
+    private byte[] generateDocx(String content) {
         try (XWPFDocument doc = new XWPFDocument();
-             OutputStream os = Files.newOutputStream(output)) {
+             ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
 
             String[] paragraphs = content.split("\n\n");
             boolean firstParagraph = true;
@@ -65,7 +55,11 @@ public class FileGenerationServiceImpl implements FileGenerationService {
                 run.setText(trimmed);
             }
 
-            doc.write(os);
+            doc.write(bos);
+            return bos.toByteArray();
+
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to generate DOCX content", e);
         }
     }
 }

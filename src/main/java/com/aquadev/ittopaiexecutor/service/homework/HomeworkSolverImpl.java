@@ -13,10 +13,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Optional;
 
 @Slf4j
@@ -30,15 +26,12 @@ public class HomeworkSolverImpl implements HomeworkSolver {
     private final SubjectPromptService subjectPromptService;
 
     @Override
-    public SolvedHomework solve(Path homeworkPath, Long specId) {
+    public SolvedHomework solve(byte[] content, String filename, Long specId) {
         TokenUsage tokenUsage = new TokenUsage();
 
-        String filename = homeworkPath.getFileName().toString();
-        byte[] bytes = readBytes(homeworkPath);
-
         DocumentExtractor extractor = strategyResolver.resolve(filename);
-        ExtractedDocument extracted = extractor.extract(bytes, filename, chatClient);
-        log.debug("Extracted document text length={}", extracted.text().length());
+        ExtractedDocument extracted = extractor.extract(content, filename, chatClient);
+        log.debug("Extracted document: filename={}, textLength={}", filename, extracted.text().length());
 
         Optional<SubjectPrompt> customPrompt = subjectPromptService.findBySpecId(specId);
         if (customPrompt.isPresent()) {
@@ -52,13 +45,5 @@ public class HomeworkSolverImpl implements HomeworkSolver {
         log.info("Token usage — {}", tokenUsage);
 
         return solution;
-    }
-
-    private byte[] readBytes(Path path) {
-        try {
-            return Files.readAllBytes(path);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to read homework file: " + path, e);
-        }
     }
 }
