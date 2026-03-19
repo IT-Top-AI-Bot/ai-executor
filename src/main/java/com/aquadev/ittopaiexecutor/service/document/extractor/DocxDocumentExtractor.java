@@ -26,14 +26,6 @@ public class DocxDocumentExtractor implements DocumentExtractor {
 
     private static final Set<String> SUPPORTED_MIME_TYPES = Set.of("docx", "doc");
 
-    private static final String PROMPT_TEMPLATE = """
-            Document text:
-            {text}
-            
-            The document also contains {count} embedded image(s) attached below.
-            Keep the original text as-is and append descriptions of the images.
-            """;
-
     @Override
     public Set<String> supportedMimeTypes() {
         return SUPPORTED_MIME_TYPES;
@@ -42,24 +34,18 @@ public class DocxDocumentExtractor implements DocumentExtractor {
     @Override
     public ExtractedDocument extract(byte[] content, String filename, ChatClient chatClient) {
         String text = extractText(content, filename);
-        List<Resource> images = extractImageResources(content);
+        List<Resource> imageResources = extractImageResources(content, filename);
 
-        if (images.isEmpty()) {
+        if (imageResources.isEmpty()) {
             return new ExtractedDocument(text, Map.of("source", filename));
         }
 
-        String fullContent = chatClient.prompt()
-                .user(u -> {
-                    u.text(PROMPT_TEMPLATE)
-                            .param("text", text)
-                            .param("count", String.valueOf(images.size()));
+        List<Media> images = imageResources.stream()
+                .map(img -> new Media(detectMime(img), img))
+                .toList();
 
-                    images.forEach(img -> u.media(new Media(detectMime(img), img)));
-                })
-                .call()
-                .content();
-
-        return new ExtractedDocument(fullContent, Map.of("source", filename, "images", images.size()));
+        log.debug("Extracted {} images from DOCX, will pass directly to generation step", images.size());
+        return new ExtractedDocument(text, Map.of("source", filename, "images", images.size()), images);
     }
 
     private String extractText(byte[] content, String filename) {
@@ -74,7 +60,12 @@ public class DocxDocumentExtractor implements DocumentExtractor {
                 .collect(Collectors.joining("\n\n"));
     }
 
-    private List<Resource> extractImageResources(byte[] content) {
+    private List<Resource> extractImageResources(byte[] content, String filename) {
+        if (filename.toLowerCase().endsWith(".doc")) {
+            // OLE2 format — XWPFDocument is OOXML only; skip image extraction
+            log.debug("Skipping image extraction for OLE2 .doc file: {}", filename);
+            return List.of();
+        }
         try (XWPFDocument doc = new XWPFDocument(new ByteArrayInputStream(content))) {
             return doc.getAllPictures().stream()
                     .map(pic -> (Resource) new ByteArrayResource(pic.getData()) {

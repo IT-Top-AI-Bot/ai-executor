@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -127,7 +128,8 @@ public class FileGenerationServiceImpl implements FileGenerationService {
             }
             XWPFRun run = para.createRun();
             run.setText(text);
-            run.setFontSize(10);
+            run.setFontFamily(FONT);
+            run.setFontSize(11);
             run.setBold(isHeader);
         }
     }
@@ -141,30 +143,54 @@ public class FileGenerationServiceImpl implements FileGenerationService {
 
     // ─── Paragraphs ───────────────────────────────────────────────────────────
 
+    private static final String FONT = "Times New Roman";
+
+    // twips: 1440 = 1 inch, 720 = 1.27 cm (стандартный абзацный отступ)
+    private static final int FIRST_LINE_INDENT = 720;
+    // line spacing 1.5 = 360 (в единицах 1/240 пункта: 240 * 1.5 = 360)
+    private static final int LINE_SPACING_15 = 360;
+
     private void renderLine(XWPFDocument doc, String line, boolean isFirstParagraph) {
         if (line.startsWith("### ")) {
-            addParagraph(doc, line.substring(4).strip(), 13, true, ParagraphAlignment.LEFT);
+            addParagraph(doc, line.substring(4).strip(), 13, true, ParagraphAlignment.LEFT, false);
         } else if (line.startsWith("## ")) {
-            addParagraph(doc, line.substring(3).strip(), 14, true, ParagraphAlignment.LEFT);
+            addParagraph(doc, line.substring(3).strip(), 14, true, ParagraphAlignment.LEFT, false);
         } else if (line.startsWith("# ")) {
-            addParagraph(doc, line.substring(2).strip(), 16, true, ParagraphAlignment.CENTER);
+            addParagraph(doc, line.substring(2).strip(), 16, true, ParagraphAlignment.CENTER, false);
         } else if (line.startsWith("- ") || line.startsWith("* ")) {
-            addParagraph(doc, "• " + line.substring(2).strip(), 11, false, ParagraphAlignment.LEFT);
+            addParagraph(doc, "• " + line.substring(2).strip(), 12, false, ParagraphAlignment.LEFT, false);
         } else if (line.matches("^\\d+\\.\\s.*")) {
-            addParagraph(doc, line, 11, false, ParagraphAlignment.LEFT);
+            addParagraph(doc, line, 12, false, ParagraphAlignment.LEFT, false);
         } else if (isFirstParagraph) {
-            // First text block = document title
-            addParagraph(doc, line, 14, true, ParagraphAlignment.CENTER);
+            addParagraph(doc, line, 14, true, ParagraphAlignment.CENTER, false);
         } else {
-            addParagraph(doc, line, 11, false, ParagraphAlignment.LEFT);
+            addParagraph(doc, line, 12, false, ParagraphAlignment.LEFT, true);
         }
     }
 
     private void addParagraph(XWPFDocument doc, String text, int fontSize,
-                               boolean bold, ParagraphAlignment align) {
+                              boolean bold, ParagraphAlignment align, boolean indent) {
         XWPFParagraph p = doc.createParagraph();
         p.setAlignment(align);
+        applySpacing(p, indent);
         addInlineRuns(p, text, fontSize, bold);
+    }
+
+    private void applySpacing(XWPFParagraph p, boolean firstLineIndent) {
+        var pPr = p.getCTP().isSetPPr() ? p.getCTP().getPPr() : p.getCTP().addNewPPr();
+
+        // Межстрочный интервал 1.5
+        var spacing = pPr.isSetSpacing() ? pPr.getSpacing() : pPr.addNewSpacing();
+        spacing.setLine(BigInteger.valueOf(LINE_SPACING_15));
+        spacing.setLineRule(
+                org.openxmlformats.schemas.wordprocessingml.x2006.main.STLineSpacingRule.AUTO
+        );
+
+        // Абзацный отступ первой строки
+        if (firstLineIndent) {
+            var ind = pPr.isSetInd() ? pPr.getInd() : pPr.addNewInd();
+            ind.setFirstLine(BigInteger.valueOf(FIRST_LINE_INDENT));
+        }
     }
 
     /**
@@ -196,6 +222,7 @@ public class FileGenerationServiceImpl implements FileGenerationService {
     private void createRun(XWPFParagraph para, String text, int fontSize, boolean bold) {
         XWPFRun run = para.createRun();
         run.setText(text);
+        run.setFontFamily(FONT);
         run.setFontSize(fontSize);
         run.setBold(bold);
     }

@@ -29,12 +29,25 @@ public class SubjectPromptServiceImpl implements SubjectPromptService {
 
     @Override
     @Transactional
+    public SubjectPromptResponse upsert(Long specId, SubjectPromptRequest request) {
+        SubjectPrompt entity = repository.findById(specId).orElseGet(SubjectPrompt::new);
+        entity.setSpecId(specId);
+        entity.setNameSpec(request.nameSpec());
+        entity.setSystemPrompt(request.systemPrompt());
+        entity.setVisionPrompt(request.visionPrompt());
+        entity.setStaticText(request.staticText());
+        return toResponse(repository.save(entity));
+    }
+
+    @Override
+    @Transactional
     public SubjectPromptResponse update(Long specId, SubjectPromptRequest request) {
         SubjectPrompt entity = repository.findById(specId)
                 .orElseThrow(() -> new IllegalArgumentException("Prompt for specId=" + specId + " not found"));
         entity.setNameSpec(request.nameSpec());
         entity.setSystemPrompt(request.systemPrompt());
         entity.setVisionPrompt(request.visionPrompt());
+        entity.setStaticText(request.staticText());
         return toResponse(repository.save(entity));
     }
 
@@ -62,10 +75,11 @@ public class SubjectPromptServiceImpl implements SubjectPromptService {
         e.setNameSpec(req.nameSpec());
         e.setSystemPrompt(req.systemPrompt());
         e.setVisionPrompt(req.visionPrompt());
+        e.setStaticText(req.staticText());
         return e;
     }
 
     private SubjectPromptResponse toResponse(SubjectPrompt e) {
-        return new SubjectPromptResponse(e.getSpecId(), e.getNameSpec(), e.getSystemPrompt(), e.getVisionPrompt());
+        return new SubjectPromptResponse(e.getSpecId(), e.getNameSpec(), e.getSystemPrompt(), e.getVisionPrompt(), e.getStaticText());
     }
 }

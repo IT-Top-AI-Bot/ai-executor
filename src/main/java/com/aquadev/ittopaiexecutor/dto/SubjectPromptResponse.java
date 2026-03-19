@@ -4,6 +4,7 @@ public record SubjectPromptResponse(
         Long specId,
         String nameSpec,
         String systemPrompt,
-        String visionPrompt
+        String visionPrompt,
+        String staticText
 ) {
 }

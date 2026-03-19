@@ -1,5 +1,7 @@
 package com.aquadev.ittopaiexecutor.util;
 
+import org.springframework.lang.Nullable;
+
 import java.util.Map;
 
 public final class ContentTypeUtils {
@@ -27,6 +29,13 @@ public final class ContentTypeUtils {
             Map.entry("jpeg",  "image/jpeg")
     );
 
+    private static final Map<String, String> BY_CONTENT_TYPE = Map.of(
+            "application/pdf", "pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx",
+            "application/msword", "doc",
+            "text/plain", "txt"
+    );
+
     private ContentTypeUtils() {
     }
 
@@ -50,5 +59,17 @@ public final class ContentTypeUtils {
         }
         String ext = filename.substring(filename.lastIndexOf('.') + 1);
         return forExtension(ext);
+    }
+
+    /**
+     * Returns the file extension for a given Content-Type value (ignoring parameters).
+     * Returns {@code null} for unknown or unsupported content types.
+     * Example: {@code "application/pdf"} → {@code "pdf"}.
+     */
+    @Nullable
+    public static String extensionForContentType(@Nullable String contentType) {
+        if (contentType == null || contentType.isBlank()) return null;
+        String mediaType = contentType.split(";")[0].trim().toLowerCase();
+        return BY_CONTENT_TYPE.get(mediaType);
     }
 }

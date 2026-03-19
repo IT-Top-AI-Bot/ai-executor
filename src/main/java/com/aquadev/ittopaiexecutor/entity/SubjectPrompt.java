@@ -1,6 +1,9 @@
 package com.aquadev.ittopaiexecutor.entity;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -17,9 +20,12 @@ public class SubjectPrompt {
     @Column(name = "name_spec", nullable = false)
     private String nameSpec;
 
-    @Column(name = "system_prompt", nullable = false, columnDefinition = "TEXT")
+    @Column(name = "system_prompt", columnDefinition = "TEXT")
     private String systemPrompt;
 
     @Column(name = "vision_prompt", columnDefinition = "TEXT")
     private String visionPrompt;
+
+    @Column(name = "static_text", columnDefinition = "TEXT")
+    private String staticText;
 }

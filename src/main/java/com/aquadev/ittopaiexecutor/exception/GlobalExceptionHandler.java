@@ -18,6 +18,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.List;
@@ -178,6 +179,18 @@ public class GlobalExceptionHandler {
                 ex.getI18nKey(),
                 ex.getArgs()
         );
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ErrorResponse> handleResponseStatus(
+            ResponseStatusException ex,
+            HttpServletRequest request
+    ) {
+        HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
+        if (status == null) status = HttpStatus.INTERNAL_SERVER_ERROR;
+        log.debug("ResponseStatusException for path={}: {}", request.getRequestURI(), ex.getReason());
+        return buildResponse(status, ex.getReason() != null ? ex.getReason() : status.getReasonPhrase(),
+                request, List.of(), null, Map.of());
     }
 
     @ExceptionHandler(Exception.class)

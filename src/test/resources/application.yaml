@@ -1,0 +1,51 @@
+spring:
+  config:
+    import: ""   # отключаем import optional:file:.env для тестов
+
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    database-platform: org.hibernate.dialect.H2Dialect
+
+  liquibase:
+    enabled: false
+
+  kafka:
+    bootstrap-servers: ${spring.embedded.kafka.brokers}
+    consumer:
+      group-id: it-top-ai-executor-test
+
+  ai:
+    mistralai:
+      api-key: test-key-for-context-load
+      chat:
+        options:
+          model: mistral-large-latest
+
+  cloud:
+    aws:
+      region:
+        static: us-east-1
+        auto: false
+      credentials:
+        access-key: test-access-key
+        secret-key: test-secret-key
+      s3:
+        endpoint: http://localhost:4566
+        path-style-access-enabled: true
+
+s3:
+  bucket: test-bucket
+
+it-top-ai:
+  base-url: http://localhost:8080
+
+kafka:
+  homework-execution-topic: homework-execution
+  homework-result-topic: homework-result

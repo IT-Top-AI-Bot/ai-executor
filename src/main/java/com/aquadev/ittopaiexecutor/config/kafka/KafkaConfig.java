@@ -1,20 +1,24 @@
 package com.aquadev.ittopaiexecutor.config.kafka;
 
-import com.aquadev.ittopaiexecutor.dto.kafka.HomeworkExecutionEvent;
-import com.aquadev.ittopaiexecutor.dto.kafka.HomeworkExecutionResultEvent;
+import com.aquadev.commonlibs.HomeworkExecutionEvent;
+import com.aquadev.commonlibs.HomeworkExecutionResultEvent;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.SerializationException;
+import org.apache.kafka.common.serialization.Deserializer;
+import org.apache.kafka.common.serialization.Serializer;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
-import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
@@ -26,8 +30,6 @@ import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.DeserializationException;
 import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
-import org.springframework.kafka.support.serializer.JsonDeserializer;
-import org.springframework.kafka.support.serializer.JsonSerializer;
 import org.springframework.util.backoff.FixedBackOff;
 
 import java.util.HashMap;
@@ -35,7 +37,6 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
-@EnableKafka
 @Configuration
 @EnableConfigurationProperties(KafkaTopicProperties.class)
 public class KafkaConfig {
@@ -46,18 +47,15 @@ public class KafkaConfig {
 
     @Bean
     public ConsumerFactory<String, HomeworkExecutionEvent> homeworkExecutionConsumerFactory(
-            org.springframework.boot.autoconfigure.kafka.KafkaProperties bootKafkaProps,
+            KafkaProperties bootKafkaProps,
             ObjectMapper objectMapper
     ) {
-        var configs = bootKafkaProps.buildConsumerProperties(null);
+        var configs = bootKafkaProps.buildConsumerProperties();
         configs.remove(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG);
 
-        var deserializer = new JsonDeserializer<>(HomeworkExecutionEvent.class, objectMapper);
-        deserializer.setUseTypeHeaders(false);
-
         return new DefaultKafkaConsumerFactory<>(configs,
-                new org.apache.kafka.common.serialization.StringDeserializer(),
-                new ErrorHandlingDeserializer<>(deserializer));
+                new StringDeserializer(),
+                new ErrorHandlingDeserializer<>(new JacksonDeserializer<>(HomeworkExecutionEvent.class, objectMapper)));
     }
 
     @Bean(name = "homeworkExecutionKafkaListenerContainerFactory")
@@ -105,10 +103,7 @@ public class KafkaConfig {
             ObjectMapper objectMapper
     ) {
         Map<String, Object> config = new HashMap<>(props.buildProducerProperties());
-
         config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-
         config.put(ProducerConfig.ACKS_CONFIG, "all");
         config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         config.put(ProducerConfig.RETRIES_CONFIG, Integer.toString(Integer.MAX_VALUE));
@@ -116,9 +111,7 @@ public class KafkaConfig {
 
         DefaultKafkaProducerFactory<String, HomeworkExecutionResultEvent> pf =
                 new DefaultKafkaProducerFactory<>(config);
-
-        pf.setValueSerializer(new JsonSerializer<>(objectMapper));
-
+        pf.setValueSerializer(new JacksonSerializer<>(objectMapper));
         return pf;
     }
 
@@ -130,8 +123,12 @@ public class KafkaConfig {
     }
 
     @Bean
-    public ProducerFactory<String, Object> dlqProducerFactory(KafkaProperties props) {
-        return new DefaultKafkaProducerFactory<>(props.buildProducerProperties());
+    public ProducerFactory<String, Object> dlqProducerFactory(KafkaProperties props, ObjectMapper objectMapper) {
+        Map<String, Object> config = new HashMap<>(props.buildProducerProperties());
+        config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        DefaultKafkaProducerFactory<String, Object> pf = new DefaultKafkaProducerFactory<>(config);
+        pf.setValueSerializer(new SmartSerializer(objectMapper));
+        return pf;
     }
 
     @Bean
@@ -189,4 +186,44 @@ public class KafkaConfig {
         }
         return message.substring(0, MAX_ERROR_MESSAGE_LENGTH) + "... [truncated]";
     }
+
+    private record JacksonDeserializer<T>(Class<T> targetType, ObjectMapper objectMapper) implements Deserializer<T> {
+
+        @Override
+            public T deserialize(String topic, byte[] data) {
+                if (data == null) return null;
+                try {
+                    return objectMapper.readValue(data, targetType);
+                } catch (Exception e) {
+                    throw new SerializationException("Error deserializing JSON from topic: " + topic, e);
+                }
+            }
+        }
+
+    private record JacksonSerializer<T>(ObjectMapper objectMapper) implements Serializer<T> {
+
+        @Override
+            public byte[] serialize(String topic, T data) {
+                if (data == null) return null;
+                try {
+                    return objectMapper.writeValueAsBytes(data);
+                } catch (JsonProcessingException e) {
+                    throw new SerializationException("Error serializing JSON for topic: " + topic, e);
+                }
+            }
+        }
+
+    private record SmartSerializer(ObjectMapper objectMapper) implements Serializer<Object> {
+
+        @Override
+            public byte[] serialize(String topic, Object data) {
+                if (data == null) return null;
+                if (data instanceof byte[] bytes) return bytes;
+                try {
+                    return objectMapper.writeValueAsBytes(data);
+                } catch (JsonProcessingException e) {
+                    throw new SerializationException("Error serializing JSON for topic: " + topic, e);
+                }
+            }
+        }
 }

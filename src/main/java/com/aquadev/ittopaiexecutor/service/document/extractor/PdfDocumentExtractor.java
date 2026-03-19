@@ -9,13 +9,22 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentCatalog;
 import org.apache.pdfbox.pdmodel.PDDocumentNameDictionary;
 import org.apache.pdfbox.pdmodel.PDEmbeddedFilesNameTreeNode;
+import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification;
 import org.apache.pdfbox.pdmodel.common.filespecification.PDEmbeddedFile;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationFileAttachment;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.content.Media;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Component;
+import org.springframework.util.MimeType;
+import org.springframework.util.MimeTypeUtils;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -40,15 +49,87 @@ public class PdfDocumentExtractor implements DocumentExtractor {
 
     @Override
     public ExtractedDocument extract(byte[] content, String filename, ChatClient chatClient) {
-        String ocrText      = mistralOcrService.extractText(content);
+        MistralOcrService.OcrResult ocr = mistralOcrService.extract(content);
         String embeddedText = extractEmbeddedTxtFiles(content);
+        List<Media> embeddedImages = extractEmbeddedImageFiles(content);
 
         String fullText = embeddedText.isBlank()
-                ? ocrText
-                : ocrText + "\n\n[Вложенные файлы]\n" + embeddedText;
+                ? ocr.text()
+                : ocr.text() + "\n\n[Вложенные файлы]\n" + embeddedText;
 
-        log.debug("PDF extracted via OCR: filename={}, totalLength={}", filename, fullText.length());
-        return new ExtractedDocument(fullText.trim(), Map.of("source", filename));
+        List<Media> allImages = new ArrayList<>(ocr.images());
+        allImages.addAll(embeddedImages);
+
+        log.debug("PDF extracted via OCR: filename={}, totalLength={}, ocrImages={}, attachedImages={}",
+                filename, fullText.length(), ocr.images().size(), embeddedImages.size());
+        return new ExtractedDocument(fullText.trim(), Map.of("source", filename), allImages);
+    }
+
+    // ─── Embedded image files (PDFBox) ────────────────────────────────────────
+
+    private static final Set<String> IMAGE_EXTENSIONS = Set.of("png", "jpg", "jpeg", "gif", "webp", "bmp", "svg");
+
+    private List<Media> extractEmbeddedImageFiles(byte[] pdfBytes) {
+        List<Media> result = new ArrayList<>();
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            // 1. Document-level name tree attachments
+            PDDocumentCatalog catalog = doc.getDocumentCatalog();
+            PDDocumentNameDictionary names = catalog.getNames();
+            if (names != null) {
+                PDEmbeddedFilesNameTreeNode tree = names.getEmbeddedFiles();
+                if (tree != null) {
+                    Map<String, PDComplexFileSpecification> fileMap = tree.getNames();
+                    if (fileMap != null) {
+                        for (Map.Entry<String, PDComplexFileSpecification> entry : fileMap.entrySet()) {
+                            extractImageFromSpec(entry.getKey(), entry.getValue(), result);
+                        }
+                    }
+                }
+            }
+
+            // 2. Page annotation attachments (скрепки в Adobe Reader)
+            for (PDPage page : doc.getPages()) {
+                for (PDAnnotation ann : page.getAnnotations()) {
+                    if (ann instanceof PDAnnotationFileAttachment fileAnn) {
+                        PDComplexFileSpecification spec = (PDComplexFileSpecification) fileAnn.getFile();
+                        if (spec != null) {
+                            extractImageFromSpec(spec.getFilename(), spec, result);
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            log.warn("Could not extract embedded images from PDF: {}", e.getMessage());
+        }
+        return result;
+    }
+
+    private void extractImageFromSpec(String name, PDComplexFileSpecification spec, List<Media> result) {
+        if (name == null) return;
+        String ext = name.contains(".")
+                ? name.substring(name.lastIndexOf('.') + 1).toLowerCase()
+                : "";
+        if (!IMAGE_EXTENSIONS.contains(ext)) return;
+
+        PDEmbeddedFile embeddedFile = spec.getEmbeddedFile();
+        if (embeddedFile == null) return;
+
+        try {
+            byte[] imgBytes = embeddedFile.toByteArray();
+            result.add(new Media(detectImageMime(ext), new ByteArrayResource(imgBytes)));
+            log.debug("Extracted embedded image from PDF: name={}, size={}", name, imgBytes.length);
+        } catch (IOException e) {
+            log.warn("Could not read embedded image {}: {}", name, e.getMessage());
+        }
+    }
+
+    private MimeType detectImageMime(String ext) {
+        return switch (ext) {
+            case "png" -> MimeTypeUtils.IMAGE_PNG;
+            case "gif" -> MimeTypeUtils.IMAGE_GIF;
+            case "svg" -> MimeType.valueOf("image/svg+xml");
+            default -> MimeTypeUtils.IMAGE_JPEG;
+        };
     }
 
     // ─── Embedded .txt files (PDFBox) ─────────────────────────────────────────

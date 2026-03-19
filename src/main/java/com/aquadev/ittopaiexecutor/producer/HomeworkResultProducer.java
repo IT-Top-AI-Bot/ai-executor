@@ -1,7 +1,7 @@
 package com.aquadev.ittopaiexecutor.producer;
 
+import com.aquadev.commonlibs.HomeworkExecutionResultEvent;
 import com.aquadev.ittopaiexecutor.config.kafka.KafkaTopicProperties;
-import com.aquadev.ittopaiexecutor.dto.kafka.HomeworkExecutionResultEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -12,7 +12,6 @@ import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -33,6 +32,16 @@ public class HomeworkResultProducer {
             @Nullable String correlationId
     ) {
         send(executionId, HomeworkExecutionResultEvent.completed(executionId, s3Key),
+                traceparent, correlationId);
+    }
+
+    public void sendCompletedText(
+            UUID executionId,
+            String text,
+            @Nullable String traceparent,
+            @Nullable String correlationId
+    ) {
+        send(executionId, HomeworkExecutionResultEvent.completedText(executionId, text),
                 traceparent, correlationId);
     }
 

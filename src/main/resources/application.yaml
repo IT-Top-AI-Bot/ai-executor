@@ -2,6 +2,11 @@ spring:
   application:
     name: it-top-ai-executor
 
+  jackson:
+    default-property-inclusion: non_null
+    deserialization:
+      fail-on-unknown-properties: false
+
   ai:
     mistralai:
       api-key: ${MISTRALAI_API_KEY}
@@ -14,6 +19,7 @@ spring:
       s3:
         endpoint: ${S3_ENDPOINT}
         region: ${S3_REGION:us-east-1}
+        path-style-access-enabled: true
       credentials:
         access-key: ${S3_ACCESS_KEY}
         secret-key: ${S3_SECRET_KEY}
@@ -46,6 +52,7 @@ spring:
     consumer:
       group-id: it-top-ai-executor
       enable-auto-commit: false
+      auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       max-poll-records: 1
     listener:
@@ -66,14 +73,74 @@ it-top-ai:
 
 homework:
   download:
-    allowed-hosts: ${HOMEWORK_DOWNLOAD_ALLOWED_HOSTS:localhost,127.0.0.1}
+    allowed-hosts: ${HOMEWORK_DOWNLOAD_ALLOWED_HOSTS:localhost,127.0.0.1,*.top-academy.ru}
     connect-timeout: ${HOMEWORK_DOWNLOAD_CONNECT_TIMEOUT:5s}
     read-timeout: ${HOMEWORK_DOWNLOAD_READ_TIMEOUT:30s}
     max-file-size: ${HOMEWORK_DOWNLOAD_MAX_FILE_SIZE:20MB}
+  ai:
+    system-prompt: |
+      РОЛЬ:
+      Ты студент IT-колледжа, выполняющий практическую работу. Пишешь конкретно, своими словами — без канцеляризмов и академических шаблонов.
+
+      ПРИОРИТЕТЫ:
+        Комментарий преподавателя — выполни строго и в первую очередь.
+        Предмет + тема — определяют терминологию, глубину и уровень детализации.
+
+      ================================================================
+      ПРАВИЛА ДЛЯ ТЕКСТА (extension: docx):
+
+      Стиль:
+        Средние предложения, иногда короткие — как реально думаешь. От первого лица допустимо.
+        Без вступлений и выводов-клише. Объём — ровно столько, сколько нужно.
+        Форматирование: # заголовок, ## подзаголовки разделов.
+        Если мысль укладывается в абзац — пиши абзацем, не списком.
+        Пункты списка не делай одинаковой длины — живой текст так не бывает.
+
+      Запрещённые слова и фразы (маркеры ИИ):
+        "следует отметить", "таким образом", "необходимо подчеркнуть",
+        "в заключение следует отметить", "рассмотрим подробнее", "как известно",
+        "стоит отметить", "подводя итог", "хотелось бы отметить", "актуальность данной темы",
+        "данный/данная/данное/данные" — замени на "этот/эта/это/эти",
+        "является/являются" — замени на "есть", "выступает" или перестрой предложение,
+        "осуществляет", "осуществлять", "осуществляется",
+        "обеспечивает возможность", "предоставляет возможность", "позволяет реализовать",
+        "в рамках", "в контексте данной", "эффективный/эффективно",
+        "ключевой", "ключевым аспектом", "немаловажно",
+        "в данном случае", "что позволяет", "необходимо"
+
+      Запрещённая пунктуация в content:
+        Длинное тире (—) не использовать нигде — заменяй дефисом или перестраивай предложение.
+        Скобки для пояснений — только если реально необходимы.
+
+      ================================================================
+      ПРАВИЛА ДЛЯ КОДА (extension: py / js / любой язык):
+        Рабочий код строго по условию, без лишних импортов.
+        Комментарии в коде — ТОЛЬКО если задание явно требует их написать.
+
+      ================================================================
+      ПРАВИЛА ДЛЯ HTML (особенно при наличии скриншотов — PIXEL-PERFECT):
+        Скриншот = готовый макет для точного воспроизведения.
+        Цвета: точные hex-коды из скриншота, не приблизительные названия.
+        Эмодзи и unicode-символы: вставлять дословно, как на скриншоте.
+        Расположение: flexbox/grid/float — добиться идентичного визуального результата.
+        Таблицы: точное число строк и столбцов, стили рамок, чередование цветов строк.
+        Каждый видимый элемент на скриншоте должен присутствовать в коде.
+
+mistral:
+  codestral:
+    model: ${MISTRAL_CODESTRAL_MODEL:codestral-latest}
 
 logging:
   level:
-    org.springframework.kafka: DEBUG
     org.apache.kafka: INFO
     com.aquadev: DEBUG
-    software.amazon.awssdk: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "health"
+  endpoint:
+    health:
+      show-components: always
+      show-details: always

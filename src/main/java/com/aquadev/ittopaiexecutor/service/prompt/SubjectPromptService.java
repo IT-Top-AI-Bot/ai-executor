@@ -11,6 +11,8 @@ public interface SubjectPromptService {
 
     SubjectPromptResponse save(SubjectPromptRequest request);
 
+    SubjectPromptResponse upsert(Long specId, SubjectPromptRequest request);
+
     SubjectPromptResponse update(Long specId, SubjectPromptRequest request);
 
     void delete(Long specId);

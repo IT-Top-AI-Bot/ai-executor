@@ -1,8 +1,7 @@
 plugins {
     java
-    id("org.springframework.boot") version "3.5.11"
+    id("org.springframework.boot") version "4.0.3"
     id("io.spring.dependency-management") version "1.1.7"
-    id("org.graalvm.buildtools.native") version "0.10.6"
 }
 
 group = "com.aquadev"
@@ -21,39 +20,61 @@ configurations {
     }
 }
 
+val commonLibsVersion by extra("1.1.0")
+
 repositories {
+    mavenLocal()
     mavenCentral()
+    maven { url = uri("https://repo.spring.io/milestone") }
+    maven {
+        name = "GitHubPackages"
+        url = uri("https://maven.pkg.github.com/aquadev-pet-projects/common-libs")
+        credentials {
+            username = System.getenv("GITHUB_ACTOR") ?: project.findProperty("gpr.user")?.toString()
+            password = System.getenv("GITHUB_TOKEN") ?: project.findProperty("gpr.key")?.toString()
+        }
+    }
 }
 
-extra["springAiVersion"] = "1.1.2"
-extra["awsSdkBomVersion"] = "3.4.2"
+val springAiVersion by extra("2.0.0-M3")
+val springCloudAwsVersion by extra("4.0.0")
+val imageIoVersion by extra("1.4.0")
 
 dependencies {
-    implementation("org.springframework.kafka:spring-kafka")
-    implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("com.aquadev:common-libs:$commonLibsVersion")
+    implementation("org.springframework.boot:spring-boot-starter-kafka")
+    implementation("org.springframework.boot:spring-boot-starter-webmvc")
+    implementation("org.springframework.boot:spring-boot-starter-aspectj")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("org.springframework.boot:spring-boot-starter-liquibase")
+    implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-validation")
-    implementation("org.springframework.ai:spring-ai-tika-document-reader")
-    implementation("com.github.jai-imageio:jai-imageio-jpeg2000:1.4.0")
-    implementation("io.awspring.cloud:spring-cloud-aws-starter-s3")
-    implementation("org.liquibase:liquibase-core")
     implementation("org.springframework.ai:spring-ai-starter-model-mistral-ai")
+    implementation("org.springframework.ai:spring-ai-tika-document-reader")
+    implementation("com.github.jai-imageio:jai-imageio-jpeg2000:$imageIoVersion")
+    implementation("io.awspring.cloud:spring-cloud-aws-starter-s3")
+    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
     compileOnly("org.projectlombok:lombok")
     runtimeOnly("org.postgresql:postgresql")
-    developmentOnly("org.springframework.boot:spring-boot-devtools")
     annotationProcessor("org.projectlombok:lombok")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.kafka:spring-kafka-test")
+    testImplementation("com.h2database:h2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 dependencyManagement {
     imports {
-        mavenBom("org.springframework.ai:spring-ai-bom:${property("springAiVersion")}")
-        mavenBom("io.awspring.cloud:spring-cloud-aws-dependencies:${property("awsSdkBomVersion")}")
+        mavenBom("org.springframework.ai:spring-ai-bom:$springAiVersion")
+        mavenBom("io.awspring.cloud:spring-cloud-aws-dependencies:$springCloudAwsVersion")
     }
 }
 
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
 }

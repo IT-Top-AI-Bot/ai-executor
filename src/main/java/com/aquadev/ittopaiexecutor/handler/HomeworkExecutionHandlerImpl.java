@@ -1,7 +1,7 @@
 package com.aquadev.ittopaiexecutor.handler;
 
+import com.aquadev.commonlibs.HomeworkExecutionEvent;
 import com.aquadev.ittopaiexecutor.dto.SolvedHomework;
-import com.aquadev.ittopaiexecutor.dto.kafka.HomeworkExecutionEvent;
 import com.aquadev.ittopaiexecutor.producer.HomeworkResultProducer;
 import com.aquadev.ittopaiexecutor.service.file.DownloadedFile;
 import com.aquadev.ittopaiexecutor.service.file.FileDownloader;
@@ -28,12 +28,20 @@ public class HomeworkExecutionHandlerImpl implements HomeworkExecutionHandler {
     public void handle(HomeworkExecutionEvent event) {
         log.info("Handling event: executionId={}, homeworkId={}, specId={}",
                 event.id(), event.homeworkId(), event.specId());
+
         DownloadedFile downloaded = fileDownloader.download(event.homeworkUrl(), event.id());
         log.info("Downloaded: filename={}, size={} bytes", downloaded.filename(), downloaded.content().length);
 
         SolvedHomework solution = homeworkSolver.solve(
-                downloaded.content(), downloaded.filename(), event.specId());
-        log.info("Solution generated: filename={}.{}", solution.filename(), solution.extension());
+                downloaded.content(), downloaded.filename(), event.specId(),
+                event.theme(), event.teacherFio(), event.nameSpec(), event.comment());
+        log.info("Solution generated: filename={}, extension={}", solution.filename(), solution.extension());
+
+        if (solution.extension() == null) {
+            homeworkResultProducer.sendCompletedText(event.id(), solution.content(), null, null);
+            log.info("Text result sent for executionId={}", event.id());
+            return;
+        }
 
         byte[] fileBytes = fileGenerationService.generateFile(solution);
 
@@ -45,7 +53,7 @@ public class HomeworkExecutionHandlerImpl implements HomeworkExecutionHandler {
         log.info("Uploaded to S3: key={}", uploadedKey);
 
         homeworkResultProducer.sendCompleted(event.id(), uploadedKey, null, null);
-        log.info("DONE event sent for executionId={}", event.id());
+        log.info("Result sent for executionId={}", event.id());
     }
 
     private String buildS3Key(HomeworkExecutionEvent event, String filename) {

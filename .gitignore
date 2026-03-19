@@ -37,3 +37,5 @@ out/
 .vscode/
 
 .env
+/.claude/settings.local.json
+/.claude/launch.json

@@ -1,10 +1,12 @@
 package com.aquadev.ittopaiexecutor.service.file;
 
 import com.aquadev.ittopaiexecutor.config.client.FileDownloadProperties;
+import com.aquadev.ittopaiexecutor.util.ContentTypeUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FilenameUtils;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -16,6 +18,7 @@ import java.net.IDN;
 import java.net.URI;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -27,6 +30,8 @@ public class FileDownloaderImpl implements FileDownloader {
     /** RFC 6266: Content-Disposition filename parameter (quoted or unquoted). */
     private static final Pattern FILENAME_PATTERN =
             Pattern.compile("filename\\s*=\\s*\"?([^\"\\s;]+)\"?", Pattern.CASE_INSENSITIVE);
+
+    private static final Set<String> KNOWN_EXTENSIONS = Set.of("doc", "docx", "pdf", "txt");
 
     private final RestClient restClient;
     private final FileDownloadProperties properties;
@@ -70,7 +75,18 @@ public class FileDownloaderImpl implements FileDownloader {
                     }
 
                     String contentDisposition = response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION);
-                    String filename = resolveFilename(uri.toString(), contentDisposition);
+                    MediaType contentType = response.getHeaders().getContentType();
+                    String filename = resolveFilename(uri.toString(), contentDisposition,
+                            contentType != null ? contentType.toString() : null);
+
+                    String currentExt = FilenameUtils.getExtension(filename).toLowerCase();
+                    if (!filename.contains(".") || !KNOWN_EXTENSIONS.contains(currentExt)) {
+                        String sniffedExt = sniffExtension(content);
+                        String baseName = filename.contains(".") ? FilenameUtils.getBaseName(filename) : "homework";
+                        filename = baseName + "." + sniffedExt;
+                        log.info("Detected file type by magic bytes: originalExt={}, sniffedExt={}, executionId={}",
+                                currentExt.isEmpty() ? "(none)" : currentExt, sniffedExt, executionId);
+                    }
 
                     log.info("Downloaded {} bytes, filename={}, executionId={}",
                             content.length, filename, executionId);
@@ -83,10 +99,11 @@ public class FileDownloaderImpl implements FileDownloader {
      * <ol>
      *   <li>Content-Disposition header — {@code filename="task.pdf"}</li>
      *   <li>Last path segment of the URL — {@code /uploads/task.pdf}</li>
+     *   <li>Content-Type header — {@code application/pdf} → {@code homework.pdf}</li>
      *   <li>Fallback: {@code "homework"} (DocumentStrategyResolver will throw on unknown extension)</li>
      * </ol>
      */
-    private String resolveFilename(String url, @Nullable String contentDisposition) {
+    private String resolveFilename(String url, @Nullable String contentDisposition, @Nullable String contentType) {
         if (contentDisposition != null) {
             Matcher m = FILENAME_PATTERN.matcher(contentDisposition);
             if (m.find()) {
@@ -107,7 +124,13 @@ public class FileDownloaderImpl implements FileDownloader {
             log.warn("Could not parse URL path for filename extraction: {}", url);
         }
 
-        log.warn("Could not determine filename with extension from URL or headers: url={}", url);
+        String ext = ContentTypeUtils.extensionForContentType(contentType);
+        if (ext != null) {
+            log.debug("Resolved filename extension from Content-Type={}: ext={}", contentType, ext);
+            return "homework." + ext;
+        }
+
+        log.warn("Could not determine filename with extension from URL, headers or Content-Type: url={}", url);
         return "homework";
     }
 
@@ -161,6 +184,31 @@ public class FileDownloaderImpl implements FileDownloader {
             return host.endsWith("." + suffix);
         }
         return host.equals(allowedPattern);
+    }
+
+    /**
+     * Detects document type by magic bytes (file signature).
+     * <ul>
+     *   <li>PDF:  {@code %PDF} → {@code pdf}</li>
+     *   <li>DOCX: {@code PK\x03\x04} (ZIP) → {@code docx}</li>
+     *   <li>DOC:  {@code D0 CF 11 E0} (OLE2) → {@code doc}</li>
+     *   <li>Fallback → {@code txt}</li>
+     * </ul>
+     */
+    private String sniffExtension(byte[] content) {
+        if (content.length >= 4) {
+            if (content[0] == 0x25 && content[1] == 0x50 && content[2] == 0x44 && content[3] == 0x46) {
+                return "pdf";
+            }
+            if (content[0] == 0x50 && content[1] == 0x4B && content[2] == 0x03 && content[3] == 0x04) {
+                return "docx";
+            }
+            if (content[0] == (byte) 0xD0 && content[1] == (byte) 0xCF
+                    && content[2] == 0x11 && content[3] == (byte) 0xE0) {
+                return "doc";
+            }
+        }
+        return "txt";
     }
 
     private byte[] readWithLimit(@Nullable java.io.InputStream body, long maxBytes) throws IOException {

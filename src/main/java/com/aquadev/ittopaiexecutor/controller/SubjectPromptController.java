@@ -6,7 +6,16 @@ import com.aquadev.ittopaiexecutor.service.prompt.SubjectPromptService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -22,6 +31,13 @@ public class SubjectPromptController {
         return service.findAll();
     }
 
+    @GetMapping("/{specId}")
+    public SubjectPromptResponse getBySpecId(@PathVariable Long specId) {
+        return service.findBySpecId(specId)
+                .map(p -> new SubjectPromptResponse(p.getSpecId(), p.getNameSpec(), p.getSystemPrompt(), p.getVisionPrompt(), p.getStaticText()))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Prompt not found for specId=" + specId));
+    }
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public SubjectPromptResponse create(@Valid @RequestBody SubjectPromptRequest request) {
@@ -29,10 +45,10 @@ public class SubjectPromptController {
     }
 
     @PutMapping("/{specId}")
-    public SubjectPromptResponse update(
+    public SubjectPromptResponse upsert(
             @PathVariable Long specId,
             @Valid @RequestBody SubjectPromptRequest request) {
-        return service.update(specId, request);
+        return service.upsert(specId, request);
     }
 
     @DeleteMapping("/{specId}")

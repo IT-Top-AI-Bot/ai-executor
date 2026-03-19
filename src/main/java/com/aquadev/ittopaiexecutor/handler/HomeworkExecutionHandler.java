@@ -1,6 +1,6 @@
 package com.aquadev.ittopaiexecutor.handler;
 
-import com.aquadev.ittopaiexecutor.dto.kafka.HomeworkExecutionEvent;
+import com.aquadev.commonlibs.HomeworkExecutionEvent;
 
 public interface HomeworkExecutionHandler {
 

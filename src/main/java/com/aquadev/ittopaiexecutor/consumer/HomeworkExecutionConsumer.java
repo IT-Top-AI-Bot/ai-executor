@@ -1,6 +1,6 @@
 package com.aquadev.ittopaiexecutor.consumer;
 
-import com.aquadev.ittopaiexecutor.dto.kafka.HomeworkExecutionEvent;
+import com.aquadev.commonlibs.HomeworkExecutionEvent;
 import com.aquadev.ittopaiexecutor.handler.HomeworkExecutionHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

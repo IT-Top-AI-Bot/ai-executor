@@ -26,22 +26,33 @@ public class HomeworkSolverImpl implements HomeworkSolver {
     private final SubjectPromptService subjectPromptService;
 
     @Override
-    public SolvedHomework solve(byte[] content, String filename, Long specId) {
+    public SolvedHomework solve(byte[] content, String filename, Long specId,
+                                String theme, String teacherFio, String nameSpec, String comment) {
+        Optional<SubjectPrompt> customPrompt = subjectPromptService.findBySpecId(specId);
+
+        if (customPrompt.isPresent() && customPrompt.get().getStaticText() != null) {
+            log.info("Using static text for specId={}, skipping AI", specId);
+            return new SolvedHomework(null, null, customPrompt.get().getStaticText());
+        }
+
         TokenUsage tokenUsage = new TokenUsage();
 
         DocumentExtractor extractor = strategyResolver.resolve(filename);
         ExtractedDocument extracted = extractor.extract(content, filename, chatClient);
         log.debug("Extracted document: filename={}, textLength={}", filename, extracted.text().length());
 
-        Optional<SubjectPrompt> customPrompt = subjectPromptService.findBySpecId(specId);
+
         if (customPrompt.isPresent()) {
-            log.info("Using custom prompt for specId={}", specId);
+            log.info("Using custom AI prompt for specId={}", specId);
         } else {
             log.info("No custom prompt for specId={}, using default", specId);
         }
         String systemPrompt = customPrompt.map(SubjectPrompt::getSystemPrompt).orElse(null);
 
-        SolvedHomework solution = homeworkAiService.solve(extracted.text(), tokenUsage, systemPrompt);
+        SolvedHomework solution = homeworkAiService.solve(
+                extracted.text(), tokenUsage, systemPrompt,
+                theme, teacherFio, nameSpec, comment,
+                extracted.images());
         log.info("Token usage — {}", tokenUsage);
 
         return solution;
