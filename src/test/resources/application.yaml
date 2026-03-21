@@ -49,3 +49,7 @@ it-top-ai:
 kafka:
   homework-execution-topic: homework-execution
   homework-result-topic: homework-result
+
+homework:
+  ai:
+    system-prompt: "Test system prompt"

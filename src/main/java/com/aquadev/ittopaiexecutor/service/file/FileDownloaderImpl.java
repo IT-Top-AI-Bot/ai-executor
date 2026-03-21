@@ -2,17 +2,21 @@ package com.aquadev.ittopaiexecutor.service.file;
 
 import com.aquadev.ittopaiexecutor.config.client.FileDownloadProperties;
 import com.aquadev.ittopaiexecutor.util.ContentTypeUtils;
+import com.aquadev.ittopaiexecutor.util.FileTypeDetector;
+import io.micrometer.tracing.annotation.NewSpan;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FilenameUtils;
-import org.springframework.beans.factory.annotation.Qualifier;
+import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.lang.Nullable;
+import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.net.IDN;
 import java.net.URI;
@@ -25,84 +29,79 @@ import java.util.regex.Pattern;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class FileDownloaderImpl implements FileDownloader {
 
-    /** RFC 6266: Content-Disposition filename parameter (quoted or unquoted). */
     private static final Pattern FILENAME_PATTERN =
             Pattern.compile("filename\\s*=\\s*\"?([^\"\\s;]+)\"?", Pattern.CASE_INSENSITIVE);
 
-    private static final Set<String> KNOWN_EXTENSIONS = Set.of("doc", "docx", "pdf", "txt");
+    private static final Set<String> KNOWN_EXTENSIONS = Set.of(
+            "doc", "docx", "pptx", "ppt", "xlsx", "xls", "pdf", "txt",
+            "png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "tif"
+    );
 
-    private final RestClient restClient;
+    private final FileTypeDetector fileTypeDetector;
     private final FileDownloadProperties properties;
-
-    public FileDownloaderImpl(
-            @Qualifier("fileDownloaderRestClient") RestClient restClient,
-            FileDownloadProperties properties
-    ) {
-        this.restClient = restClient;
-        this.properties = properties;
-    }
+    private final RestClient fileDownloaderRestClient;
 
     @Override
+    @NewSpan("file.download")
     public DownloadedFile download(String url, UUID executionId) {
         URI uri = validateDownloadUri(url);
         log.info("Downloading homework: host={}, executionId={}", uri.getHost(), executionId);
-
-        return restClient.get()
+        return fileDownloaderRestClient.get()
                 .uri(uri)
-                .exchange((request, response) -> {
-                    int status = response.getStatusCode().value();
-                    if (status >= 400 && status < 500) {
-                        throw new IllegalArgumentException("Download rejected with status=%d for %s".formatted(status, uri));
-                    }
-                    if (status >= 500) {
-                        throw new IllegalStateException("Download failed with retryable status=%d for %s".formatted(status, uri));
-                    }
-
-                    long contentLength = response.getHeaders().getContentLength();
-                    if (contentLength > properties.getMaxFileSizeBytes()) {
-                        throw new IllegalArgumentException(
-                                "File exceeds max size: %d bytes > %d bytes".formatted(
-                                        contentLength, properties.getMaxFileSizeBytes()));
-                    }
-
-                    byte[] content;
-                    try {
-                        content = readWithLimit(response.getBody(), properties.getMaxFileSizeBytes());
-                    } catch (IOException e) {
-                        throw new UncheckedIOException("Failed to read response body from: " + uri, e);
-                    }
-
-                    String contentDisposition = response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION);
-                    MediaType contentType = response.getHeaders().getContentType();
-                    String filename = resolveFilename(uri.toString(), contentDisposition,
-                            contentType != null ? contentType.toString() : null);
-
-                    String currentExt = FilenameUtils.getExtension(filename).toLowerCase();
-                    if (!filename.contains(".") || !KNOWN_EXTENSIONS.contains(currentExt)) {
-                        String sniffedExt = sniffExtension(content);
-                        String baseName = filename.contains(".") ? FilenameUtils.getBaseName(filename) : "homework";
-                        filename = baseName + "." + sniffedExt;
-                        log.info("Detected file type by magic bytes: originalExt={}, sniffedExt={}, executionId={}",
-                                currentExt.isEmpty() ? "(none)" : currentExt, sniffedExt, executionId);
-                    }
-
-                    log.info("Downloaded {} bytes, filename={}, executionId={}",
-                            content.length, filename, executionId);
-                    return new DownloadedFile(content, filename);
-                });
+                .exchange((_, response) -> processResponse(uri, response, executionId));
     }
 
-    /**
-     * Resolves the original filename by checking (in priority order):
-     * <ol>
-     *   <li>Content-Disposition header — {@code filename="task.pdf"}</li>
-     *   <li>Last path segment of the URL — {@code /uploads/task.pdf}</li>
-     *   <li>Content-Type header — {@code application/pdf} → {@code homework.pdf}</li>
-     *   <li>Fallback: {@code "homework"} (DocumentStrategyResolver will throw on unknown extension)</li>
-     * </ol>
-     */
+    private DownloadedFile processResponse(URI uri, ClientHttpResponse response, UUID executionId) throws IOException {
+        validateResponseStatus(response.getStatusCode().value(), uri);
+
+        long contentLength = response.getHeaders().getContentLength();
+        if (contentLength > properties.getMaxFileSizeBytes()) {
+            throw new IllegalArgumentException(
+                    "File exceeds max size: %d bytes > %d bytes".formatted(contentLength, properties.getMaxFileSizeBytes()));
+        }
+
+        byte[] content;
+        try {
+            content = readWithLimit(response.getBody(), properties.getMaxFileSizeBytes());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read response body from: " + uri, e);
+        }
+
+        String contentDisposition = response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION);
+        MediaType contentType = response.getHeaders().getContentType();
+        String filename = resolveFilename(uri.toString(), contentDisposition,
+                contentType != null ? contentType.toString() : null);
+
+        filename = normalizeFilenameExtension(filename, content, executionId);
+
+        log.info("Downloaded {} bytes, filename={}, executionId={}", content.length, filename, executionId);
+        return new DownloadedFile(content, filename);
+    }
+
+    private void validateResponseStatus(int status, URI uri) {
+        if (status >= 400 && status < 500) {
+            throw new IllegalArgumentException("Download rejected with status=%d for %s".formatted(status, uri));
+        }
+        if (status >= 500) {
+            throw new IllegalStateException("Download failed with retryable status=%d for %s".formatted(status, uri));
+        }
+    }
+
+    private String normalizeFilenameExtension(String filename, byte[] content, UUID executionId) {
+        String currentExt = FilenameUtils.getExtension(filename).toLowerCase();
+        if (filename.contains(".") && KNOWN_EXTENSIONS.contains(currentExt)) {
+            return filename;
+        }
+        String detectedExt = fileTypeDetector.detectExtension(content);
+        String baseName = filename.contains(".") ? FilenameUtils.getBaseName(filename) : "homework";
+        log.info("Detected file type via Tika: originalExt={}, detectedExt={}, executionId={}",
+                currentExt.isEmpty() ? "(none)" : currentExt, detectedExt, executionId);
+        return baseName + "." + detectedExt;
+    }
+
     private String resolveFilename(String url, @Nullable String contentDisposition, @Nullable String contentType) {
         if (contentDisposition != null) {
             Matcher m = FILENAME_PATTERN.matcher(contentDisposition);
@@ -120,7 +119,7 @@ public class FileDownloaderImpl implements FileDownloader {
             if (!name.isBlank() && !FilenameUtils.getExtension(name).isBlank()) {
                 return name;
             }
-        } catch (Exception e) {
+        } catch (Exception _) {
             log.warn("Could not parse URL path for filename extraction: {}", url);
         }
 
@@ -186,32 +185,7 @@ public class FileDownloaderImpl implements FileDownloader {
         return host.equals(allowedPattern);
     }
 
-    /**
-     * Detects document type by magic bytes (file signature).
-     * <ul>
-     *   <li>PDF:  {@code %PDF} → {@code pdf}</li>
-     *   <li>DOCX: {@code PK\x03\x04} (ZIP) → {@code docx}</li>
-     *   <li>DOC:  {@code D0 CF 11 E0} (OLE2) → {@code doc}</li>
-     *   <li>Fallback → {@code txt}</li>
-     * </ul>
-     */
-    private String sniffExtension(byte[] content) {
-        if (content.length >= 4) {
-            if (content[0] == 0x25 && content[1] == 0x50 && content[2] == 0x44 && content[3] == 0x46) {
-                return "pdf";
-            }
-            if (content[0] == 0x50 && content[1] == 0x4B && content[2] == 0x03 && content[3] == 0x04) {
-                return "docx";
-            }
-            if (content[0] == (byte) 0xD0 && content[1] == (byte) 0xCF
-                    && content[2] == 0x11 && content[3] == (byte) 0xE0) {
-                return "doc";
-            }
-        }
-        return "txt";
-    }
-
-    private byte[] readWithLimit(@Nullable java.io.InputStream body, long maxBytes) throws IOException {
+    private byte[] readWithLimit(@Nullable InputStream body, long maxBytes) throws IOException {
         if (body == null) {
             throw new IOException("Response body is empty");
         }

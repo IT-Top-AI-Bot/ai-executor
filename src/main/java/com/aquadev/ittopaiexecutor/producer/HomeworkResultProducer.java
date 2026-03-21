@@ -8,10 +8,8 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
-import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 
-import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -20,67 +18,34 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class HomeworkResultProducer {
 
-    public static final String HDR_CORRELATION_ID = "correlationId";
-
     private final KafkaTopicProperties kafkaTopicProperties;
     private final KafkaTemplate<String, HomeworkExecutionResultEvent> resultKafkaTemplate;
 
-    public void sendCompleted(
-            UUID executionId,
-            String s3Key,
-            @Nullable String traceparent,
-            @Nullable String correlationId
-    ) {
-        send(executionId, HomeworkExecutionResultEvent.completed(executionId, s3Key),
-                traceparent, correlationId);
+    public void sendCompleted(UUID executionId, String s3Key) {
+        send(executionId, HomeworkExecutionResultEvent.completed(executionId, s3Key));
     }
 
-    public void sendCompletedText(
-            UUID executionId,
-            String text,
-            @Nullable String traceparent,
-            @Nullable String correlationId
-    ) {
-        send(executionId, HomeworkExecutionResultEvent.completedText(executionId, text),
-                traceparent, correlationId);
+    public void sendCompletedText(UUID executionId, String text) {
+        send(executionId, HomeworkExecutionResultEvent.completedText(executionId, text));
     }
 
-    public void sendFailed(
-            UUID executionId,
-            String errorMessage,
-            @Nullable String traceparent,
-            @Nullable String correlationId
-    ) {
-        send(executionId, HomeworkExecutionResultEvent.failed(executionId, errorMessage),
-                traceparent, correlationId);
-    }
-
-    private void send(
-            UUID executionId,
-            HomeworkExecutionResultEvent event,
-            @Nullable String traceparent,
-            @Nullable String correlationId
-    ) {
+    private void send(UUID executionId, HomeworkExecutionResultEvent event) {
         String key = executionId.toString();
 
-        ProducerRecord<String, HomeworkExecutionResultEvent> record =
+        ProducerRecord<String, HomeworkExecutionResultEvent> producerRecord =
                 new ProducerRecord<>(kafkaTopicProperties.homeworkResultTopic(), key, event);
-
-        if (correlationId != null && !correlationId.isBlank()) {
-            record.headers().add(HDR_CORRELATION_ID, correlationId.getBytes(StandardCharsets.UTF_8));
-        }
-        if (traceparent != null && !traceparent.isBlank()) {
-            record.headers().add("traceparent", traceparent.getBytes(StandardCharsets.UTF_8));
-        }
 
         try {
             SendResult<String, HomeworkExecutionResultEvent> result =
-                    resultKafkaTemplate.send(record).get(10, TimeUnit.SECONDS);
+                    resultKafkaTemplate.send(producerRecord).get(10, TimeUnit.SECONDS);
 
             RecordMetadata md = result.getRecordMetadata();
             log.info("Result sent: executionId={}, status={}, topic={}, partition={}, offset={}",
                     executionId, event.status(), md.topic(), md.partition(), md.offset());
 
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while publishing result for executionId=" + executionId, ex);
         } catch (Exception ex) {
             log.error("Failed to send result event: executionId={}, status={}",
                     executionId, event.status(), ex);

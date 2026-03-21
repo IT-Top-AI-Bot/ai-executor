@@ -28,7 +28,8 @@ public class HomeworkExecutionConsumer {
             @Header(KafkaHeaders.OFFSET) long offset,
             Acknowledgment acknowledgment) {
 
-        log.debug("Received partition={} offset={}", partition, offset);
+        log.info("Kafka received: executionId={}, homeworkId={}, specId={}, url={}, partition={}, offset={}",
+                event.id(), event.homeworkId(), event.specId(), event.homeworkUrl(), partition, offset);
 
         if (event.id() == null) throw new IllegalArgumentException("id is null");
         if (event.homeworkId() == null) throw new IllegalArgumentException("homeworkId is null");

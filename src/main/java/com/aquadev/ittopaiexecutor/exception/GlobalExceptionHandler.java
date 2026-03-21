@@ -24,6 +24,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 @Slf4j
 @RestControllerAdvice
@@ -98,7 +99,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleMalformedRequest(
-            HttpMessageNotReadableException ex,
             HttpServletRequest request
     ) {
         return buildResponse(
@@ -134,9 +134,8 @@ public class GlobalExceptionHandler {
             MethodArgumentTypeMismatchException ex,
             HttpServletRequest request
     ) {
-        String requiredType = ex.getRequiredType() != null
-                ? ex.getRequiredType().getSimpleName()
-                : "unknown";
+        Class<?> type = ex.getRequiredType();
+        String requiredType = type != null ? type.getSimpleName() : "unknown";
 
         List<ValidationErrorResponse> validationErrors = List.of(
                 new ValidationErrorResponse(ex.getName(), "Expected type: " + requiredType));
@@ -245,7 +244,7 @@ public class GlobalExceptionHandler {
             return template;
         }
 
-        String resolved = template;
+        String resolved = Objects.requireNonNullElse(template, Objects.requireNonNullElse(fallback, ""));
         for (Map.Entry<String, Object> entry : args.entrySet()) {
             resolved = resolved.replace("{" + entry.getKey() + "}", String.valueOf(entry.getValue()));
         }

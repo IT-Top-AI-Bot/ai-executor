@@ -1,6 +1,7 @@
 package com.aquadev.ittopaiexecutor.handler;
 
 import com.aquadev.commonlibs.HomeworkExecutionEvent;
+import com.aquadev.ittopaiexecutor.dto.SolveRequest;
 import com.aquadev.ittopaiexecutor.dto.SolvedHomework;
 import com.aquadev.ittopaiexecutor.producer.HomeworkResultProducer;
 import com.aquadev.ittopaiexecutor.service.file.DownloadedFile;
@@ -9,6 +10,7 @@ import com.aquadev.ittopaiexecutor.service.file.FileGenerationService;
 import com.aquadev.ittopaiexecutor.service.file.S3UploadService;
 import com.aquadev.ittopaiexecutor.service.homework.HomeworkSolver;
 import com.aquadev.ittopaiexecutor.util.ContentTypeUtils;
+import io.micrometer.tracing.Tracer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -18,6 +20,7 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class HomeworkExecutionHandlerImpl implements HomeworkExecutionHandler {
 
+    private final Tracer tracer;
     private final FileDownloader fileDownloader;
     private final HomeworkSolver homeworkSolver;
     private final S3UploadService s3UploadService;
@@ -29,16 +32,24 @@ public class HomeworkExecutionHandlerImpl implements HomeworkExecutionHandler {
         log.info("Handling event: executionId={}, homeworkId={}, specId={}",
                 event.id(), event.homeworkId(), event.specId());
 
+        var span = tracer.currentSpan();
+        if (span != null) {
+            span.tag("homework.executionId", event.id().toString())
+                    .tag("homework.homeworkId", event.homeworkId().toString());
+        }
+
         DownloadedFile downloaded = fileDownloader.download(event.homeworkUrl(), event.id());
         log.info("Downloaded: filename={}, size={} bytes", downloaded.filename(), downloaded.content().length);
 
-        SolvedHomework solution = homeworkSolver.solve(
+        SolveRequest solveRequest = new SolveRequest(
                 downloaded.content(), downloaded.filename(), event.specId(),
                 event.theme(), event.teacherFio(), event.nameSpec(), event.comment());
+
+        SolvedHomework solution = homeworkSolver.solve(solveRequest);
         log.info("Solution generated: filename={}, extension={}", solution.filename(), solution.extension());
 
         if (solution.extension() == null) {
-            homeworkResultProducer.sendCompletedText(event.id(), solution.content(), null, null);
+            homeworkResultProducer.sendCompletedText(event.id(), solution.content());
             log.info("Text result sent for executionId={}", event.id());
             return;
         }
@@ -52,7 +63,7 @@ public class HomeworkExecutionHandlerImpl implements HomeworkExecutionHandler {
         String uploadedKey = s3UploadService.upload(fileBytes, s3Key, contentType);
         log.info("Uploaded to S3: key={}", uploadedKey);
 
-        homeworkResultProducer.sendCompleted(event.id(), uploadedKey, null, null);
+        homeworkResultProducer.sendCompleted(event.id(), uploadedKey);
         log.info("Result sent for executionId={}", event.id());
     }
 

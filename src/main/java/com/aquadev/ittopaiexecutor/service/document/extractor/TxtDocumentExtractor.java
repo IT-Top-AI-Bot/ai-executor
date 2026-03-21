@@ -1,7 +1,6 @@
 package com.aquadev.ittopaiexecutor.service.document.extractor;
 
 import com.aquadev.ittopaiexecutor.dto.ExtractedDocument;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -19,7 +18,7 @@ public class TxtDocumentExtractor implements DocumentExtractor {
     }
 
     @Override
-    public ExtractedDocument extract(byte[] content, String filename, ChatClient chatClient) {
+    public ExtractedDocument extract(byte[] content, String filename) {
         String text = new String(content, StandardCharsets.UTF_8);
         return new ExtractedDocument(text, Map.of("source", filename));
     }

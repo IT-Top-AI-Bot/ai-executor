@@ -4,6 +4,7 @@ import com.aquadev.commonlibs.HomeworkExecutionEvent;
 import com.aquadev.commonlibs.HomeworkExecutionResultEvent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -15,6 +16,7 @@ import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.jspecify.annotations.NonNull;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.context.annotation.Bean;
@@ -38,21 +40,20 @@ import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Configuration
-@EnableConfigurationProperties(KafkaTopicProperties.class)
+@RequiredArgsConstructor
+@EnableConfigurationProperties({KafkaTopicProperties.class, KafkaProperties.class})
 public class KafkaConfig {
 
-    private static final String HDR_CORRELATION_ID = "correlationId";
-    private static final String HDR_TRACEPARENT = "traceparent";
     private static final int MAX_ERROR_MESSAGE_LENGTH = 500;
 
-    @Bean
-    public ConsumerFactory<String, HomeworkExecutionEvent> homeworkExecutionConsumerFactory(
-            KafkaProperties bootKafkaProps,
-            ObjectMapper objectMapper
-    ) {
-        var configs = bootKafkaProps.buildConsumerProperties();
-        configs.remove(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG);
+    private final KafkaProperties kafkaProperties;
+    private final ObjectMapper objectMapper;
+    private final KafkaTopicProperties kafkaTopicProperties;
 
+    @Bean
+    public ConsumerFactory<String, HomeworkExecutionEvent> homeworkExecutionConsumerFactory() {
+        var configs = kafkaProperties.buildConsumerProperties();
+        configs.remove(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG);
         return new DefaultKafkaConsumerFactory<>(configs,
                 new StringDeserializer(),
                 new ErrorHandlingDeserializer<>(new JacksonDeserializer<>(HomeworkExecutionEvent.class, objectMapper)));
@@ -63,32 +64,24 @@ public class KafkaConfig {
     homeworkExecutionKafkaListenerContainerFactory(
             ConsumerFactory<String, HomeworkExecutionEvent> homeworkExecutionConsumerFactory,
             KafkaTemplate<String, Object> kafkaTemplate,
-            KafkaTemplate<String, HomeworkExecutionResultEvent> resultKafkaTemplate,
-            KafkaTopicProperties kafkaTopicProperties
+            KafkaTemplate<String, HomeworkExecutionResultEvent> resultKafkaTemplate
     ) {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, HomeworkExecutionEvent>();
         factory.setConsumerFactory(homeworkExecutionConsumerFactory);
         factory.setConcurrency(1);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+        factory.getContainerProperties().setObservationEnabled(true);
 
         var deadLetterRecoverer = new DeadLetterPublishingRecoverer(
                 kafkaTemplate,
-                (rec, ex) -> {
+                (consumerRecord, ex) -> {
                     log.error("Sending to DLQ topic={} partition={} offset={}: {}",
-                            rec.topic(), rec.partition(), rec.offset(), ex.getMessage(), ex);
-                    return new TopicPartition(rec.topic() + ".DLQ", rec.partition());
+                            consumerRecord.topic(), consumerRecord.partition(), consumerRecord.offset(), ex.getMessage(), ex);
+                    return new TopicPartition(consumerRecord.topic() + ".DLQ", consumerRecord.partition());
                 }
         );
 
-        var errorHandler = new DefaultErrorHandler((record, ex) -> {
-            publishFailedResult(record, ex, resultKafkaTemplate, kafkaTopicProperties);
-            deadLetterRecoverer.accept(record, ex);
-        }, new FixedBackOff(1000, 3));
-
-        errorHandler.setCommitRecovered(true);
-        errorHandler.setRetryListeners((record, ex, deliveryAttempt) ->
-                log.warn("Retrying topic={} partition={} offset={} attempt={} due to {}",
-                        record.topic(), record.partition(), record.offset(), deliveryAttempt, ex.toString()));
+        var errorHandler = getDefaultErrorHandler(resultKafkaTemplate, deadLetterRecoverer);
 
         errorHandler.addNotRetryableExceptions(IllegalArgumentException.class);
         errorHandler.addNotRetryableExceptions(DeserializationException.class);
@@ -97,12 +90,27 @@ public class KafkaConfig {
         return factory;
     }
 
+    private @NonNull DefaultErrorHandler getDefaultErrorHandler(KafkaTemplate<String, HomeworkExecutionResultEvent> resultKafkaTemplate, DeadLetterPublishingRecoverer deadLetterRecoverer) {
+        var errorHandler = new DefaultErrorHandler((consumerRecord, ex) -> {
+            publishFailedResult(consumerRecord, ex, resultKafkaTemplate);
+            deadLetterRecoverer.accept(consumerRecord, ex);
+        }, new FixedBackOff(1000, 3));
+
+        errorHandler.setCommitRecovered(true);
+        errorHandler.setRetryListeners((consumerRecord, ex, deliveryAttempt) -> {
+            Throwable rootCause = ex;
+            for (Throwable c = ex; c != null; c = c.getCause()) rootCause = c;
+            assert rootCause != null;
+            log.warn("Retrying topic={} partition={} offset={} attempt={}: {} - {}",
+                    consumerRecord.topic(), consumerRecord.partition(), consumerRecord.offset(), deliveryAttempt,
+                    rootCause.getClass().getSimpleName(), rootCause.getMessage());
+        });
+        return errorHandler;
+    }
+
     @Bean
-    public ProducerFactory<String, HomeworkExecutionResultEvent> resultProducerFactory(
-            KafkaProperties props,
-            ObjectMapper objectMapper
-    ) {
-        Map<String, Object> config = new HashMap<>(props.buildProducerProperties());
+    public ProducerFactory<String, HomeworkExecutionResultEvent> resultProducerFactory() {
+        Map<String, Object> config = new HashMap<>(kafkaProperties.buildProducerProperties());
         config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         config.put(ProducerConfig.ACKS_CONFIG, "all");
         config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
@@ -119,12 +127,14 @@ public class KafkaConfig {
     public KafkaTemplate<String, HomeworkExecutionResultEvent> resultKafkaTemplate(
             ProducerFactory<String, HomeworkExecutionResultEvent> resultProducerFactory
     ) {
-        return new KafkaTemplate<>(resultProducerFactory);
+        var template = new KafkaTemplate<>(resultProducerFactory);
+        template.setObservationEnabled(true);
+        return template;
     }
 
     @Bean
-    public ProducerFactory<String, Object> dlqProducerFactory(KafkaProperties props, ObjectMapper objectMapper) {
-        Map<String, Object> config = new HashMap<>(props.buildProducerProperties());
+    public ProducerFactory<String, Object> dlqProducerFactory() {
+        Map<String, Object> config = new HashMap<>(kafkaProperties.buildProducerProperties());
         config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         DefaultKafkaProducerFactory<String, Object> pf = new DefaultKafkaProducerFactory<>(config);
         pf.setValueSerializer(new SmartSerializer(objectMapper));
@@ -133,18 +143,19 @@ public class KafkaConfig {
 
     @Bean
     public KafkaTemplate<String, Object> kafkaTemplate(ProducerFactory<String, Object> dlqProducerFactory) {
-        return new KafkaTemplate<>(dlqProducerFactory);
+        var template = new KafkaTemplate<>(dlqProducerFactory);
+        template.setObservationEnabled(true);
+        return template;
     }
 
     private void publishFailedResult(
-            ConsumerRecord<?, ?> record,
+            ConsumerRecord<?, ?> consumerRecord,
             Exception ex,
-            KafkaTemplate<String, HomeworkExecutionResultEvent> resultKafkaTemplate,
-            KafkaTopicProperties kafkaTopicProperties
+            KafkaTemplate<String, HomeworkExecutionResultEvent> resultKafkaTemplate
     ) {
-        if (!(record.value() instanceof HomeworkExecutionEvent event) || event.id() == null) {
+        if (!(consumerRecord.value() instanceof HomeworkExecutionEvent event) || event.id() == null) {
             log.warn("Cannot publish FAILED result event: invalid payload for topic={} partition={} offset={}",
-                    record.topic(), record.partition(), record.offset());
+                    consumerRecord.topic(), consumerRecord.partition(), consumerRecord.offset());
             return;
         }
 
@@ -154,26 +165,15 @@ public class KafkaConfig {
         ProducerRecord<String, HomeworkExecutionResultEvent> failedRecord =
                 new ProducerRecord<>(kafkaTopicProperties.homeworkResultTopic(), event.id().toString(), failedEvent);
 
-        copyHeaderIfPresent(record, failedRecord, HDR_CORRELATION_ID);
-        copyHeaderIfPresent(record, failedRecord, HDR_TRACEPARENT);
-
         try {
             var metadata = resultKafkaTemplate.send(failedRecord).get(10, TimeUnit.SECONDS).getRecordMetadata();
             log.info("FAILED result sent: executionId={}, topic={}, partition={}, offset={}",
                     event.id(), metadata.topic(), metadata.partition(), metadata.offset());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("Interrupted while sending FAILED result event for executionId={}", event.id(), e);
         } catch (Exception sendEx) {
             log.error("Could not send FAILED result event for executionId={}", event.id(), sendEx);
-        }
-    }
-
-    private void copyHeaderIfPresent(
-            ConsumerRecord<?, ?> source,
-            ProducerRecord<String, HomeworkExecutionResultEvent> target,
-            String headerName
-    ) {
-        var header = source.headers().lastHeader(headerName);
-        if (header != null && header.value() != null) {
-            target.headers().add(headerName, header.value());
         }
     }
 
@@ -190,40 +190,40 @@ public class KafkaConfig {
     private record JacksonDeserializer<T>(Class<T> targetType, ObjectMapper objectMapper) implements Deserializer<T> {
 
         @Override
-            public T deserialize(String topic, byte[] data) {
-                if (data == null) return null;
-                try {
-                    return objectMapper.readValue(data, targetType);
-                } catch (Exception e) {
-                    throw new SerializationException("Error deserializing JSON from topic: " + topic, e);
-                }
+        public T deserialize(String topic, byte[] data) {
+            if (data == null) return null;
+            try {
+                return objectMapper.readValue(data, targetType);
+            } catch (Exception e) {
+                throw new SerializationException("Error deserializing JSON from topic: " + topic, e);
             }
         }
+    }
 
     private record JacksonSerializer<T>(ObjectMapper objectMapper) implements Serializer<T> {
 
         @Override
-            public byte[] serialize(String topic, T data) {
-                if (data == null) return null;
-                try {
-                    return objectMapper.writeValueAsBytes(data);
-                } catch (JsonProcessingException e) {
-                    throw new SerializationException("Error serializing JSON for topic: " + topic, e);
-                }
+        public byte[] serialize(String topic, T data) {
+            if (data == null) return new byte[0];
+            try {
+                return objectMapper.writeValueAsBytes(data);
+            } catch (JsonProcessingException e) {
+                throw new SerializationException("Error serializing JSON for topic: " + topic, e);
             }
         }
+    }
 
     private record SmartSerializer(ObjectMapper objectMapper) implements Serializer<Object> {
 
         @Override
-            public byte[] serialize(String topic, Object data) {
-                if (data == null) return null;
-                if (data instanceof byte[] bytes) return bytes;
-                try {
-                    return objectMapper.writeValueAsBytes(data);
-                } catch (JsonProcessingException e) {
-                    throw new SerializationException("Error serializing JSON for topic: " + topic, e);
-                }
+        public byte[] serialize(String topic, Object data) {
+            if (data == null) return new byte[0];
+            if (data instanceof byte[] bytes) return bytes;
+            try {
+                return objectMapper.writeValueAsBytes(data);
+            } catch (JsonProcessingException e) {
+                throw new SerializationException("Error serializing JSON for topic: " + topic, e);
             }
         }
+    }
 }

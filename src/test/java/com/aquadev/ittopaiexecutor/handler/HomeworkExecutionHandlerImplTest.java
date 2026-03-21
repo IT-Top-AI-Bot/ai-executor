@@ -2,6 +2,7 @@ package com.aquadev.ittopaiexecutor.handler;
 
 import com.aquadev.commonlibs.HomeworkExecutionEvent;
 import com.aquadev.commonlibs.HomeworkExecutionStatus;
+import com.aquadev.ittopaiexecutor.dto.SolveRequest;
 import com.aquadev.ittopaiexecutor.dto.SolvedHomework;
 import com.aquadev.ittopaiexecutor.producer.HomeworkResultProducer;
 import com.aquadev.ittopaiexecutor.service.file.DownloadedFile;
@@ -22,7 +23,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -55,7 +55,7 @@ class HomeworkExecutionHandlerImplTest {
         String s3Key = "42-" + event.id() + "-answer.docx";
 
         when(fileDownloader.download(event.homeworkUrl(), event.id())).thenReturn(downloaded);
-        when(homeworkSolver.solve(downloaded.content(), "hw.pdf", event.specId())).thenReturn(solution);
+        when(homeworkSolver.solve(any(SolveRequest.class))).thenReturn(solution);
         when(fileGenerationService.generateFile(solution)).thenReturn(fileBytes);
         when(s3UploadService.upload(fileBytes,
                 "42-" + event.id() + "-answer.docx",
@@ -64,7 +64,7 @@ class HomeworkExecutionHandlerImplTest {
 
         handler.handle(event);
 
-        verify(homeworkResultProducer).sendCompleted(eq(event.id()), eq(s3Key), isNull(), isNull());
+        verify(homeworkResultProducer).sendCompleted(event.id(), s3Key);
     }
 
     // ── handle: S3 key format ─────────────────────────────────────────────────
@@ -78,7 +78,7 @@ class HomeworkExecutionHandlerImplTest {
         SolvedHomework solution = new SolvedHomework("result", "txt", "text");
 
         when(fileDownloader.download(any(), eq(executionId))).thenReturn(downloaded);
-        when(homeworkSolver.solve(any(), any(), any())).thenReturn(solution);
+        when(homeworkSolver.solve(any(SolveRequest.class))).thenReturn(solution);
         when(fileGenerationService.generateFile(solution)).thenReturn("bytes".getBytes());
         when(s3UploadService.upload(any(), anyString(), anyString())).thenReturn("uploaded-key");
 
@@ -112,7 +112,7 @@ class HomeworkExecutionHandlerImplTest {
         HomeworkExecutionEvent event = buildEvent(10L);
         when(fileDownloader.download(any(), any()))
                 .thenReturn(new DownloadedFile("c".getBytes(), "hw.pdf"));
-        when(homeworkSolver.solve(any(), any(), any()))
+        when(homeworkSolver.solve(any(SolveRequest.class)))
                 .thenThrow(new RuntimeException("AI error"));
 
         assertThatThrownBy(() -> handler.handle(event))

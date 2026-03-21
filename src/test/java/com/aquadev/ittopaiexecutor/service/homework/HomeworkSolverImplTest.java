@@ -1,8 +1,9 @@
 package com.aquadev.ittopaiexecutor.service.homework;
 
+import com.aquadev.ittopaiexecutor.dto.AiSolveRequest;
 import com.aquadev.ittopaiexecutor.dto.ExtractedDocument;
+import com.aquadev.ittopaiexecutor.dto.SolveRequest;
 import com.aquadev.ittopaiexecutor.dto.SolvedHomework;
-import com.aquadev.ittopaiexecutor.dto.TokenUsage;
 import com.aquadev.ittopaiexecutor.entity.SubjectPrompt;
 import com.aquadev.ittopaiexecutor.service.ai.HomeworkAiService;
 import com.aquadev.ittopaiexecutor.service.document.DocumentStrategyResolver;
@@ -13,7 +14,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.chat.client.ChatClient;
 
 import java.util.Map;
 import java.util.Optional;
@@ -21,8 +21,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -31,8 +30,6 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class HomeworkSolverImplTest {
 
-    @Mock
-    ChatClient chatClient;
     @Mock
     DocumentStrategyResolver strategyResolver;
     @Mock
@@ -54,7 +51,7 @@ class HomeworkSolverImplTest {
         DocumentExtractor extractor = mock(DocumentExtractor.class);
         ExtractedDocument extracted = new ExtractedDocument("extracted text", Map.of());
         when(strategyResolver.resolve(filename)).thenReturn(extractor);
-        when(extractor.extract(content, filename, chatClient)).thenReturn(extracted);
+        when(extractor.extract(content, filename)).thenReturn(extracted);
 
         SubjectPrompt customPrompt = new SubjectPrompt();
         customPrompt.setSpecId(specId);
@@ -62,13 +59,15 @@ class HomeworkSolverImplTest {
         when(subjectPromptService.findBySpecId(specId)).thenReturn(Optional.of(customPrompt));
 
         SolvedHomework expected = new SolvedHomework("result", "docx", "Answer content");
-        when(homeworkAiService.solve(eq("extracted text"), any(TokenUsage.class), eq("Custom system prompt for Math")))
-                .thenReturn(expected);
+        when(homeworkAiService.solve(
+                argThat(r -> "Custom system prompt for Math".equals(r.systemPrompt()))
+        )).thenReturn(expected);
 
-        SolvedHomework result = solver.solve(content, filename, specId);
+        SolvedHomework result = solver.solve(new SolveRequest(content, filename, specId, null, null, null, null));
 
         assertThat(result).isSameAs(expected);
-        verify(homeworkAiService).solve(eq("extracted text"), any(), eq("Custom system prompt for Math"));
+        verify(homeworkAiService).solve(
+                argThat(r -> "Custom system prompt for Math".equals(r.systemPrompt())));
     }
 
     // ── solve: without custom prompt ─────────────────────────────────────────
@@ -81,19 +80,21 @@ class HomeworkSolverImplTest {
 
         DocumentExtractor extractor = mock(DocumentExtractor.class);
         when(strategyResolver.resolve(filename)).thenReturn(extractor);
-        when(extractor.extract(content, filename, chatClient))
+        when(extractor.extract(content, filename))
                 .thenReturn(new ExtractedDocument("text", Map.of()));
 
         when(subjectPromptService.findBySpecId(specId)).thenReturn(Optional.empty());
 
         SolvedHomework expected = new SolvedHomework("result", "txt", "Answer");
-        when(homeworkAiService.solve(eq("text"), any(TokenUsage.class), isNull()))
-                .thenReturn(expected);
+        when(homeworkAiService.solve(
+                argThat((AiSolveRequest r) -> r.systemPrompt() == null)
+        )).thenReturn(expected);
 
-        SolvedHomework result = solver.solve(content, filename, specId);
+        SolvedHomework result = solver.solve(new SolveRequest(content, filename, specId, null, null, null, null));
 
         assertThat(result).isSameAs(expected);
-        verify(homeworkAiService).solve(eq("text"), any(), isNull());
+        verify(homeworkAiService).solve(
+                argThat((AiSolveRequest r) -> r.systemPrompt() == null));
     }
 
     // ── solve: extraction error propagates ───────────────────────────────────
@@ -105,10 +106,10 @@ class HomeworkSolverImplTest {
 
         DocumentExtractor extractor = mock(DocumentExtractor.class);
         when(strategyResolver.resolve(filename)).thenReturn(extractor);
-        when(extractor.extract(content, filename, chatClient))
+        when(extractor.extract(content, filename))
                 .thenThrow(new RuntimeException("Parse error"));
 
-        assertThatThrownBy(() -> solver.solve(content, filename, 1L))
+        assertThatThrownBy(() -> solver.solve(new SolveRequest(content, filename, 1L, null, null, null, null)))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Parse error");
 
@@ -124,13 +125,13 @@ class HomeworkSolverImplTest {
 
         DocumentExtractor extractor = mock(DocumentExtractor.class);
         when(strategyResolver.resolve(filename)).thenReturn(extractor);
-        when(extractor.extract(content, filename, chatClient))
+        when(extractor.extract(content, filename))
                 .thenReturn(new ExtractedDocument("text", Map.of()));
         when(subjectPromptService.findBySpecId(any())).thenReturn(Optional.empty());
-        when(homeworkAiService.solve(any(), any(), any()))
+        when(homeworkAiService.solve(any(AiSolveRequest.class)))
                 .thenReturn(new SolvedHomework("f", "pdf", "c"));
 
-        solver.solve(content, filename, 1L);
+        solver.solve(new SolveRequest(content, filename, 1L, null, null, null, null));
 
         verify(strategyResolver).resolve("report.pdf");
     }

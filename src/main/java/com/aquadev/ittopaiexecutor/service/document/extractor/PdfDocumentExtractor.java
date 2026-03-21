@@ -6,7 +6,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.PDDocumentCatalog;
 import org.apache.pdfbox.pdmodel.PDDocumentNameDictionary;
 import org.apache.pdfbox.pdmodel.PDEmbeddedFilesNameTreeNode;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -14,7 +13,6 @@ import org.apache.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecifica
 import org.apache.pdfbox.pdmodel.common.filespecification.PDEmbeddedFile;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationFileAttachment;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.content.Media;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Component;
@@ -28,17 +26,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * Извлекает содержимое PDF двумя способами:
- * 1. Mistral OCR API (mistral-ocr-latest) — текст, таблицы, изображения, макеты
- * 2. PDFBox — вложенные .txt-файлы из аннотаций PDF (edge case)
- */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class PdfDocumentExtractor implements DocumentExtractor {
 
     private static final Set<String> SUPPORTED = Set.of("pdf");
+    private static final Set<String> IMAGE_EXTENSIONS = Set.of("png", "jpg", "jpeg", "gif", "webp", "bmp", "svg");
 
     private final MistralOcrService mistralOcrService;
 
@@ -48,60 +42,83 @@ public class PdfDocumentExtractor implements DocumentExtractor {
     }
 
     @Override
-    public ExtractedDocument extract(byte[] content, String filename, ChatClient chatClient) {
+    public ExtractedDocument extract(byte[] content, String filename) {
         MistralOcrService.OcrResult ocr = mistralOcrService.extract(content);
-        String embeddedText = extractEmbeddedTxtFiles(content);
-        List<Media> embeddedImages = extractEmbeddedImageFiles(content);
+        EmbeddedFiles embedded = extractEmbeddedFiles(content);
 
-        String fullText = embeddedText.isBlank()
+        String fullText = embedded.text().isBlank()
                 ? ocr.text()
-                : ocr.text() + "\n\n[Вложенные файлы]\n" + embeddedText;
+                : ocr.text() + "\n\n[Вложенные файлы]\n" + embedded.text();
 
         List<Media> allImages = new ArrayList<>(ocr.images());
-        allImages.addAll(embeddedImages);
+        allImages.addAll(embedded.images());
 
         log.debug("PDF extracted via OCR: filename={}, totalLength={}, ocrImages={}, attachedImages={}",
-                filename, fullText.length(), ocr.images().size(), embeddedImages.size());
+                filename, fullText.length(), ocr.images().size(), embedded.images().size());
         return new ExtractedDocument(fullText.trim(), Map.of("source", filename), allImages);
     }
 
-    // ─── Embedded image files (PDFBox) ────────────────────────────────────────
 
-    private static final Set<String> IMAGE_EXTENSIONS = Set.of("png", "jpg", "jpeg", "gif", "webp", "bmp", "svg");
+    private EmbeddedFiles extractEmbeddedFiles(byte[] pdfBytes) {
+        StringBuilder txtContent = new StringBuilder();
+        List<Media> images = new ArrayList<>();
 
-    private List<Media> extractEmbeddedImageFiles(byte[] pdfBytes) {
-        List<Media> result = new ArrayList<>();
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
-            // 1. Document-level name tree attachments
-            PDDocumentCatalog catalog = doc.getDocumentCatalog();
-            PDDocumentNameDictionary names = catalog.getNames();
-            if (names != null) {
-                PDEmbeddedFilesNameTreeNode tree = names.getEmbeddedFiles();
-                if (tree != null) {
-                    Map<String, PDComplexFileSpecification> fileMap = tree.getNames();
-                    if (fileMap != null) {
-                        for (Map.Entry<String, PDComplexFileSpecification> entry : fileMap.entrySet()) {
-                            extractImageFromSpec(entry.getKey(), entry.getValue(), result);
-                        }
-                    }
-                }
-            }
-
-            // 2. Page annotation attachments (скрепки в Adobe Reader)
-            for (PDPage page : doc.getPages()) {
-                for (PDAnnotation ann : page.getAnnotations()) {
-                    if (ann instanceof PDAnnotationFileAttachment fileAnn) {
-                        PDComplexFileSpecification spec = (PDComplexFileSpecification) fileAnn.getFile();
-                        if (spec != null) {
-                            extractImageFromSpec(spec.getFilename(), spec, result);
-                        }
-                    }
-                }
-            }
+            extractFromNameTree(doc.getDocumentCatalog().getNames(), txtContent, images);
+            extractFromPageAnnotations(doc, images);
         } catch (IOException e) {
-            log.warn("Could not extract embedded images from PDF: {}", e.getMessage());
+            log.warn("Could not extract embedded files from PDF: {}", e.getMessage());
         }
-        return result;
+
+        return new EmbeddedFiles(txtContent.toString().trim(), images);
+    }
+
+    private void extractFromNameTree(
+            PDDocumentNameDictionary names,
+            StringBuilder txtContent,
+            List<Media> images
+    ) throws IOException {
+        if (names == null) return;
+        PDEmbeddedFilesNameTreeNode tree = names.getEmbeddedFiles();
+        if (tree == null) return;
+        Map<String, PDComplexFileSpecification> fileMap = tree.getNames();
+        if (fileMap == null) return;
+
+        for (Map.Entry<String, PDComplexFileSpecification> entry : fileMap.entrySet()) {
+            String name = entry.getKey();
+            if (name == null) continue;
+            if (name.toLowerCase().endsWith(".txt")) {
+                extractTxtContent(name, entry.getValue(), txtContent);
+            } else {
+                extractImageFromSpec(name, entry.getValue(), images);
+            }
+        }
+    }
+
+    private void extractFromPageAnnotations(PDDocument doc, List<Media> images) throws IOException {
+        for (PDPage page : doc.getPages()) {
+            for (PDAnnotation ann : page.getAnnotations()) {
+                if (ann instanceof PDAnnotationFileAttachment fileAnn) {
+                    PDComplexFileSpecification spec = (PDComplexFileSpecification) fileAnn.getFile();
+                    if (spec != null) {
+                        extractImageFromSpec(spec.getFilename(), spec, images);
+                    }
+                }
+            }
+        }
+    }
+
+    private void extractTxtContent(String name, PDComplexFileSpecification spec, StringBuilder target) {
+        PDEmbeddedFile embeddedFile = spec.getEmbeddedFile();
+        if (embeddedFile == null) return;
+        try {
+            String text = new String(embeddedFile.toByteArray(), StandardCharsets.UTF_8);
+            target.append("[Вложение: ").append(name).append("]\n")
+                    .append(text).append("\n\n");
+            log.debug("Extracted embedded .txt from PDF: {}", name);
+        } catch (IOException e) {
+            log.warn("Could not read embedded .txt file {}: {}", name, e.getMessage());
+        }
     }
 
     private void extractImageFromSpec(String name, PDComplexFileSpecification spec, List<Media> result) {
@@ -132,36 +149,6 @@ public class PdfDocumentExtractor implements DocumentExtractor {
         };
     }
 
-    // ─── Embedded .txt files (PDFBox) ─────────────────────────────────────────
-
-    private String extractEmbeddedTxtFiles(byte[] pdfBytes) {
-        StringBuilder sb = new StringBuilder();
-        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
-            PDDocumentCatalog catalog = doc.getDocumentCatalog();
-            PDDocumentNameDictionary names = catalog.getNames();
-            if (names == null) return "";
-
-            PDEmbeddedFilesNameTreeNode tree = names.getEmbeddedFiles();
-            if (tree == null) return "";
-
-            Map<String, PDComplexFileSpecification> fileMap = tree.getNames();
-            if (fileMap == null || fileMap.isEmpty()) return "";
-
-            for (Map.Entry<String, PDComplexFileSpecification> entry : fileMap.entrySet()) {
-                String embName = entry.getKey();
-                if (embName != null && embName.toLowerCase().endsWith(".txt")) {
-                    PDEmbeddedFile embeddedFile = entry.getValue().getEmbeddedFile();
-                    if (embeddedFile != null) {
-                        String txtContent = new String(embeddedFile.toByteArray(), StandardCharsets.UTF_8);
-                        sb.append("[Вложение: ").append(embName).append("]\n")
-                          .append(txtContent).append("\n\n");
-                        log.debug("Extracted embedded .txt from PDF: {}", embName);
-                    }
-                }
-            }
-        } catch (IOException e) {
-            log.warn("Could not extract embedded files from PDF: {}", e.getMessage());
-        }
-        return sb.toString().trim();
+    private record EmbeddedFiles(String text, List<Media> images) {
     }
 }

@@ -1,78 +1,65 @@
 package com.aquadev.ittopaiexecutor.service.ai;
 
+import com.aquadev.ittopaiexecutor.aop.TokenUsageHolder;
+import com.aquadev.ittopaiexecutor.dto.AiSolveRequest;
 import com.aquadev.ittopaiexecutor.dto.SolvedHomework;
-import com.aquadev.ittopaiexecutor.dto.TokenUsage;
+import com.aquadev.ittopaiexecutor.exception.domain.AiResponseParsingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.tracing.annotation.NewSpan;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.content.Media;
 import org.springframework.ai.mistralai.MistralAiChatOptions;
 import org.springframework.ai.mistralai.api.MistralAiApi;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class HomeworkAiServiceImpl implements HomeworkAiService {
 
-    private static final ObjectMapper RESPONSE_MAPPER = new ObjectMapper();
-
-    private static final Set<String> CODE_KEYWORDS = Set.of(
-            "python", "javascript", "typescript", "js", "ts", "html", "css",
-            "java", "kotlin", "c#", "c++", "php", "sql", "bash", "shell",
-            "программирование", "программировать", "программа", "программный",
-            "код", "кодинг", "coding", "скрипт", "script",
-            "функция", "алгоритм", "класс", "метод",
-            "веб-разработка", "frontend", "backend", "верстка", "вёрстка"
-    );
-
     private final ChatClient chatClient;
+    private final ObjectMapper objectMapper;
+    private final TokenUsageHolder tokenUsageHolder;
 
-    @Value("${mistral.codestral.model:codestral-latest}")
-    private String codestralModel;
+    @Value("classpath:prompts/homework-system-prompt.md")
+    private Resource systemPromptResource;
 
-    @Value("${homework.ai.system-prompt}")
-    private String systemPrompt;
+    @Value("classpath:prompts/homework-user-prompt.md")
+    private Resource userPromptResource;
 
-    private static final String USER_PROMPT = """
-                Выполни практическое задание студента IT-колледжа.
-            
-                === КОНТЕКСТ ===
-                Предмет:       {subject}
-                Тема:          {theme}
-                Преподаватель: {teacherFio}
+    private PromptTemplate systemPromptTemplate;
+    private PromptTemplate userPromptTemplate;
 
-                === КОММЕНТАРИЙ ПРЕПОДАВАТЕЛЯ (выполнить строго) ===
-                {comment}
-            
-                === ЗАДАНИЕ ===
-        {homework}
-
-        """;
+    @PostConstruct
+    void initTemplates() {
+        systemPromptTemplate = new PromptTemplate(systemPromptResource);
+        userPromptTemplate = new PromptTemplate(userPromptResource);
+    }
 
     @Override
-    public SolvedHomework solve(String homeworkContext, TokenUsage tokenUsage, String systemPrompt,
-                                String theme, String teacherFio, String nameSpec, String comment,
-                                List<Media> images) {
-        boolean hasImages = images != null && !images.isEmpty();
-        boolean codingTask = isCodingTask(theme, nameSpec, homeworkContext);
+    @NewSpan("homework.ai-call")
+    public SolvedHomework solve(AiSolveRequest request) {
+        boolean hasImages = request.images() != null && !request.images().isEmpty();
 
-        String effectiveSystemPrompt = buildEffectiveSystemPrompt(systemPrompt);
-        String userMessage = buildUserMessage(homeworkContext, theme, teacherFio, nameSpec, comment, images);
+        String effectiveSystemPrompt = buildEffectiveSystemPrompt(request.systemPrompt());
+        String userMessage = buildUserMessage(request);
 
-        log.debug("AI request — coding task: {}, images: {}, model: {}",
-                codingTask, hasImages, (codingTask && !hasImages) ? codestralModel : "default");
-        log.debug("AI request — system prompt ({} chars):\n{}", effectiveSystemPrompt.length(), effectiveSystemPrompt);
-        log.debug("AI request — user message ({} chars):\n{}", userMessage.length(), userMessage);
+        log.debug("AI request — images: {}, systemPrompt: {} chars, userMessage: {} chars",
+                hasImages, effectiveSystemPrompt.length(), userMessage.length());
 
         var requestSpec = chatClient.prompt().system(effectiveSystemPrompt);
 
+        List<Media> images = request.images();
         if (hasImages) {
             requestSpec = requestSpec.user(u -> {
                 u.text(userMessage);
@@ -82,44 +69,49 @@ public class HomeworkAiServiceImpl implements HomeworkAiService {
             requestSpec = requestSpec.user(userMessage);
         }
 
-        // Codestral не поддерживает vision — используем только для текстовых задач
-        var optionsBuilder = MistralAiChatOptions.builder()
-                .responseFormat(MistralAiApi.ChatCompletionRequest.ResponseFormat.jsonSchema(SolvedHomework.class));
-        if (codingTask && !hasImages) {
-            optionsBuilder = optionsBuilder.model(codestralModel);
-        }
-        requestSpec = requestSpec.options(optionsBuilder.build());
+        var options = MistralAiChatOptions.builder()
+                .responseFormat(MistralAiApi.ChatCompletionRequest.ResponseFormat.jsonSchema(SolvedHomework.class))
+                .build();
+        requestSpec = requestSpec.options(options);
 
         ChatResponse response = requestSpec.call().chatResponse();
-        tokenUsage.addText(response.getMetadata().getUsage());
+
+        if (response == null || response.getResult() == null) {
+            throw new AiResponseParsingException("AI returned empty response", null);
+        }
+
+        tokenUsageHolder.get().addText(response.getMetadata().getUsage());
 
         String raw = response.getResult().getOutput().getText();
         log.debug("AI response ({} chars):\n{}", raw != null ? raw.length() : 0, raw);
 
         try {
-            return RESPONSE_MAPPER.readValue(raw, SolvedHomework.class);
+            return objectMapper.readValue(raw, SolvedHomework.class);
         } catch (Exception e) {
             log.error("Failed to parse AI JSON response (jsonLength={}): {}", raw != null ? raw.length() : 0, e.getMessage());
-            throw new RuntimeException("AI returned invalid JSON. parseError=" + e.getClass().getSimpleName());
+            throw new AiResponseParsingException(
+                    "AI returned invalid JSON. parseError=" + e.getClass().getSimpleName(), e);
         }
     }
 
     private String buildEffectiveSystemPrompt(String userSystemPrompt) {
+        String base = systemPromptTemplate.render();
         if (userSystemPrompt != null && !userSystemPrompt.isBlank()) {
-            return systemPrompt + "\n\nДОПОЛНИТЕЛЬНЫЕ ИНСТРУКЦИИ ОТ ПОЛЬЗОВАТЕЛЯ:\n" + userSystemPrompt;
+            return base + "\n\nДОПОЛНИТЕЛЬНЫЕ ИНСТРУКЦИИ ОТ ПОЛЬЗОВАТЕЛЯ:\n" + userSystemPrompt;
         }
-        return systemPrompt;
+        return base;
     }
 
-    private String buildUserMessage(String homeworkContext, String theme, String teacherFio,
-                                    String nameSpec, String comment, List<Media> images) {
-        String base = USER_PROMPT
-                .replace("{subject}", orDefault(nameSpec, "не указан"))
-                .replace("{theme}", orDefault(theme, "не указана"))
-                .replace("{teacherFio}", orDefault(teacherFio, "не указан"))
-                .replace("{comment}", orDefault(comment, "нет"))
-                .replace("{homework}", homeworkContext);
+    private String buildUserMessage(AiSolveRequest request) {
+        String base = userPromptTemplate.render(Map.of(
+                "subject", orDefault(request.nameSpec(), "не указан"),
+                "theme", orDefault(request.theme(), "не указана"),
+                "teacherFio", orDefault(request.teacherFio(), "не указан"),
+                "comment", orDefault(request.comment(), "нет"),
+                "homework", request.homeworkContext()
+        ));
 
+        List<Media> images = request.images();
         if (images == null || images.isEmpty()) {
             return base;
         }
@@ -137,14 +129,4 @@ public class HomeworkAiServiceImpl implements HomeworkAiService {
     private static String orDefault(String value, String fallback) {
         return (value != null && !value.isBlank()) ? value : fallback;
     }
-
-    private boolean isCodingTask(String theme, String nameSpec, String homeworkContext) {
-        String combined = (
-                (theme != null ? theme : "") + " " +
-                        (nameSpec != null ? nameSpec : "") + " " +
-                        (homeworkContext != null ? homeworkContext.substring(0, Math.min(800, homeworkContext.length())) : "")
-        ).toLowerCase();
-        return CODE_KEYWORDS.stream().anyMatch(combined::contains);
-    }
-
 }
