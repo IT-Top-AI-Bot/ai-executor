@@ -10,6 +10,8 @@ import com.aquadev.ittopaiexecutor.service.file.FileDownloader;
 import com.aquadev.ittopaiexecutor.service.file.FileGenerationService;
 import com.aquadev.ittopaiexecutor.service.file.S3UploadService;
 import com.aquadev.ittopaiexecutor.service.homework.HomeworkSolver;
+import com.aquadev.ittopaiexecutor.service.subject.SubjectSyncService;
+import io.micrometer.tracing.Tracer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -30,6 +32,10 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class HomeworkExecutionHandlerImplTest {
 
+    @Mock
+    Tracer tracer;
+    @Mock
+    SubjectSyncService subjectSyncService;
     @Mock
     FileDownloader fileDownloader;
     @Mock

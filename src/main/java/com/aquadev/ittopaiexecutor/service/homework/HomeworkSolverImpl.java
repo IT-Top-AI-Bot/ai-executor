@@ -9,6 +9,7 @@ import com.aquadev.ittopaiexecutor.entity.SubjectPrompt;
 import com.aquadev.ittopaiexecutor.service.ai.HomeworkAiService;
 import com.aquadev.ittopaiexecutor.service.document.DocumentStrategyResolver;
 import com.aquadev.ittopaiexecutor.service.document.extractor.DocumentExtractor;
+import com.aquadev.ittopaiexecutor.service.extraction.HomeworkExtractionCacheService;
 import com.aquadev.ittopaiexecutor.service.prompt.SubjectPromptService;
 import io.micrometer.tracing.annotation.NewSpan;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,7 @@ public class HomeworkSolverImpl implements HomeworkSolver {
     private final DocumentStrategyResolver strategyResolver;
     private final HomeworkAiService homeworkAiService;
     private final SubjectPromptService subjectPromptService;
+    private final HomeworkExtractionCacheService extractionCacheService;
 
     @Override
     @TrackTokenUsage
@@ -37,8 +39,7 @@ public class HomeworkSolverImpl implements HomeworkSolver {
             return new SolvedHomework(null, null, customPrompt.get().getStaticText());
         }
 
-        DocumentExtractor extractor = strategyResolver.resolve(request.filename());
-        ExtractedDocument extracted = extractor.extract(request.content(), request.filename());
+        ExtractedDocument extracted = resolveExtraction(request);
         log.debug("Extracted document: filename={}, textLength={}", request.filename(), extracted.text().length());
 
         String systemPrompt = customPrompt.map(SubjectPrompt::getSystemPrompt).orElse(null);
@@ -54,5 +55,25 @@ public class HomeworkSolverImpl implements HomeworkSolver {
                 extracted.images());
 
         return homeworkAiService.solve(aiRequest);
+    }
+
+    private ExtractedDocument resolveExtraction(SolveRequest request) {
+        if (request.homeworkId() != null) {
+            Optional<ExtractedDocument> cached = extractionCacheService.findByHomeworkId(request.homeworkId());
+            if (cached.isPresent()) {
+                log.info("Extraction cache hit for homeworkId={}", request.homeworkId());
+                return cached.get();
+            }
+        }
+
+        DocumentExtractor extractor = strategyResolver.resolve(request.filename());
+        ExtractedDocument extracted = extractor.extract(request.content(), request.filename());
+
+        if (request.homeworkId() != null) {
+            extractionCacheService.save(request.homeworkId(), extracted);
+            log.debug("Extraction cached for homeworkId={}", request.homeworkId());
+        }
+
+        return extracted;
     }
 }

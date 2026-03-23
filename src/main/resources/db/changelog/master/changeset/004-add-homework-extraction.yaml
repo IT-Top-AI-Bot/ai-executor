@@ -1,0 +1,55 @@
+databaseChangeLog:
+  - changeSet:
+      id: 004-add-homework-extraction
+      author: aqua
+      changes:
+        - createTable:
+            tableName: homework_extraction
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    primaryKeyName: pk_homework_extraction
+                    nullable: false
+              - column:
+                  name: homework_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                    unique: true
+                    uniqueConstraintName: uq_homework_extraction_homework_id
+              - column:
+                  name: extracted_text
+                  type: TEXT
+
+        - createTable:
+            tableName: homework_extraction_image
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    primaryKeyName: pk_homework_extraction_image
+                    nullable: false
+              - column:
+                  name: extraction_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_extraction_image_extraction
+                    references: homework_extraction(id)
+              - column:
+                  name: image_data
+                  type: BYTEA
+                  constraints:
+                    nullable: false
+              - column:
+                  name: mime_type
+                  type: VARCHAR(100)
+                  constraints:
+                    nullable: false

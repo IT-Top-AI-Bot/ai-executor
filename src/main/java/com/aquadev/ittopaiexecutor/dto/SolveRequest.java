@@ -9,6 +9,7 @@ public record SolveRequest(
         byte[] content,
         String filename,
         Long specId,
+        Long homeworkId,
         String theme,
         String teacherFio,
         String nameSpec,
@@ -18,11 +19,12 @@ public record SolveRequest(
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (!(o instanceof SolveRequest(byte[] c, String fn, Long sid, String th, String tfio, String ns, String cm)))
+        if (!(o instanceof SolveRequest(byte[] c, String fn, Long sid, Long hwid, String th, String tfio, String ns, String cm)))
             return false;
         return Arrays.equals(content, c)
                 && Objects.equals(filename, fn)
                 && Objects.equals(specId, sid)
+                && Objects.equals(homeworkId, hwid)
                 && Objects.equals(theme, th)
                 && Objects.equals(teacherFio, tfio)
                 && Objects.equals(nameSpec, ns)
@@ -31,7 +33,7 @@ public record SolveRequest(
 
     @Override
     public int hashCode() {
-        return Objects.hash(Arrays.hashCode(content), filename, specId, theme, teacherFio, nameSpec, comment);
+        return Objects.hash(Arrays.hashCode(content), filename, specId, homeworkId, theme, teacherFio, nameSpec, comment);
     }
 
     @NonNull
@@ -40,6 +42,7 @@ public record SolveRequest(
         return "SolveRequest[content=" + Arrays.toString(content)
                 + ", filename=" + filename
                 + ", specId=" + specId
+                + ", homeworkId=" + homeworkId
                 + ", theme=" + theme
                 + ", teacherFio=" + teacherFio
                 + ", nameSpec=" + nameSpec

@@ -9,6 +9,7 @@ import com.aquadev.ittopaiexecutor.service.file.FileDownloader;
 import com.aquadev.ittopaiexecutor.service.file.FileGenerationService;
 import com.aquadev.ittopaiexecutor.service.file.S3UploadService;
 import com.aquadev.ittopaiexecutor.service.homework.HomeworkSolver;
+import com.aquadev.ittopaiexecutor.service.subject.SubjectSyncService;
 import com.aquadev.ittopaiexecutor.util.ContentTypeUtils;
 import io.micrometer.tracing.Tracer;
 import lombok.RequiredArgsConstructor;
@@ -26,11 +27,14 @@ public class HomeworkExecutionHandlerImpl implements HomeworkExecutionHandler {
     private final S3UploadService s3UploadService;
     private final FileGenerationService fileGenerationService;
     private final HomeworkResultProducer homeworkResultProducer;
+    private final SubjectSyncService subjectSyncService;
 
     @Override
     public void handle(HomeworkExecutionEvent event) {
         log.info("Handling event: executionId={}, homeworkId={}, specId={}",
                 event.id(), event.homeworkId(), event.specId());
+
+        subjectSyncService.sync(event.specId(), event.nameSpec(), event.teacherFio());
 
         var span = tracer.currentSpan();
         if (span != null) {
@@ -42,7 +46,7 @@ public class HomeworkExecutionHandlerImpl implements HomeworkExecutionHandler {
         log.info("Downloaded: filename={}, size={} bytes", downloaded.filename(), downloaded.content().length);
 
         SolveRequest solveRequest = new SolveRequest(
-                downloaded.content(), downloaded.filename(), event.specId(),
+                downloaded.content(), downloaded.filename(), event.specId(), event.homeworkId(),
                 event.theme(), event.teacherFio(), event.nameSpec(), event.comment());
 
         SolvedHomework solution = homeworkSolver.solve(solveRequest);

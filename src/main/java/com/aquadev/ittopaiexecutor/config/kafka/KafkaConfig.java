@@ -32,7 +32,7 @@ import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.DeserializationException;
 import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
-import org.springframework.util.backoff.FixedBackOff;
+import org.springframework.util.backoff.ExponentialBackOff;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -91,10 +91,14 @@ public class KafkaConfig {
     }
 
     private @NonNull DefaultErrorHandler getDefaultErrorHandler(KafkaTemplate<String, HomeworkExecutionResultEvent> resultKafkaTemplate, DeadLetterPublishingRecoverer deadLetterRecoverer) {
+        var backOff = new ExponentialBackOff(2000L, 2.0);
+        backOff.setMaxInterval(30_000L);
+        backOff.setMaxElapsedTime(120_000L);
+
         var errorHandler = new DefaultErrorHandler((consumerRecord, ex) -> {
             publishFailedResult(consumerRecord, ex, resultKafkaTemplate);
             deadLetterRecoverer.accept(consumerRecord, ex);
-        }, new FixedBackOff(1000, 3));
+        }, backOff);
 
         errorHandler.setCommitRecovered(true);
         errorHandler.setRetryListeners((consumerRecord, ex, deliveryAttempt) -> {
@@ -178,9 +182,12 @@ public class KafkaConfig {
     }
 
     private String buildErrorMessage(Exception ex) {
+        Throwable rootCause = ex;
+        for (Throwable c = ex; c != null; c = c.getCause()) rootCause = c;
+
         String message = "%s: %s".formatted(
-                ex.getClass().getSimpleName(),
-                ex.getMessage() == null ? "n/a" : ex.getMessage());
+                rootCause.getClass().getSimpleName(),
+                rootCause.getMessage() == null ? "n/a" : rootCause.getMessage());
         if (message.length() <= MAX_ERROR_MESSAGE_LENGTH) {
             return message;
         }
