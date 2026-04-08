@@ -8,3 +8,7 @@ databaseChangeLog:
       file: db/changelog/master/changeset/003-add-teacher-and-subject.yaml
   - include:
       file: db/changelog/master/changeset/004-add-homework-extraction.yaml
+  - include:
+      file: db/changelog/master/changeset/005-refactor-homework-extraction.yaml
+  - include:
+      file: db/changelog/master/changeset/006-subject-prompt-per-user.yaml

@@ -1,0 +1,14 @@
+databaseChangeLog:
+  - changeSet:
+      id: 005-refactor-homework-extraction
+      author: aqua
+      changes:
+        - dropTable:
+            tableName: homework_extraction_image
+
+        - addColumn:
+            tableName: homework_extraction
+            columns:
+              - column:
+                  name: document_hash
+                  type: VARCHAR(64)

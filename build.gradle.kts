@@ -1,12 +1,12 @@
 plugins {
     java
-    id("org.springframework.boot") version "4.0.4"
+    id("org.springframework.boot") version "4.0.5"
     id("io.spring.dependency-management") version "1.1.7"
 }
 
 group = "com.aquadev"
 version = "0.0.1-SNAPSHOT"
-description = "it-top-ai-executor"
+description = "ai-executor"
 
 java {
     toolchain {
@@ -18,9 +18,17 @@ configurations {
     compileOnly {
         extendsFrom(configurations.annotationProcessor.get())
     }
+    all {
+        resolutionStrategy.eachDependency {
+            if (requested.group == "io.opentelemetry.proto") {
+                useVersion("1.3.2-alpha")
+                because("1.3.2 uses protobuf 4.x API, compatible with runtime")
+            }
+        }
+    }
 }
 
-val commonLibsVersion by extra("1.1.0")
+val commonLibsVersion by extra("1.2.0")
 
 repositories {
     mavenLocal()
@@ -36,9 +44,12 @@ repositories {
     }
 }
 
-val springAiVersion by extra("2.0.0-M3")
+val springAiVersion by extra("2.0.0-M4")
+val springCloudVersion by extra("2025.1.1")
 val springCloudAwsVersion by extra("4.0.0")
 val imageIoVersion by extra("1.4.0")
+val resilience4jVersion by extra("2.4.0")
+val opentelemetryVersion by extra("2.26.1-alpha")
 
 dependencies {
     implementation("com.aquadev:common-libs:$commonLibsVersion")
@@ -51,8 +62,12 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-liquibase")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-opentelemetry")
-    implementation("org.springframework.ai:spring-ai-starter-model-mistral-ai")
     implementation("org.springframework.ai:spring-ai-tika-document-reader")
+    implementation("org.springframework.ai:spring-ai-starter-model-mistral-ai")
+    implementation("org.springframework.ai:spring-ai-starter-model-google-genai")
+    implementation("org.springframework.cloud:spring-cloud-starter-config")
+    implementation("io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0:$opentelemetryVersion")
+    implementation("io.github.resilience4j:resilience4j-spring-boot4:$resilience4jVersion")
     implementation("com.github.jai-imageio:jai-imageio-jpeg2000:$imageIoVersion")
     implementation("io.awspring.cloud:spring-cloud-aws-starter-s3")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
@@ -68,6 +83,7 @@ dependencies {
 dependencyManagement {
     imports {
         mavenBom("org.springframework.ai:spring-ai-bom:$springAiVersion")
+        mavenBom("org.springframework.cloud:spring-cloud-dependencies:$springCloudVersion")
         mavenBom("io.awspring.cloud:spring-cloud-aws-dependencies:$springCloudAwsVersion")
     }
 }

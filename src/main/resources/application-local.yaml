@@ -1,0 +1,22 @@
+spring:
+  ai:
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY}
+        chat:
+          options:
+            model: gemini-3.1-flash-lite-preview
+ai:
+  mistral:
+    http:
+      proxy-host: localhost
+      proxy-port: 7890
+
+  gemini:
+    http:
+      proxy-host: 192.168.0.221
+      proxy-port: 7890
+
+  default-provider: GEMINI
+  fallback-providers:
+    - MISTRAL
