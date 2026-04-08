@@ -1,0 +1,45 @@
+databaseChangeLog:
+  - changeSet:
+      id: 006-subject-prompt-per-user
+      author: aqua
+      changes:
+        - dropTable:
+            tableName: subject_prompt
+
+        - createTable:
+            tableName: subject_prompt
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  autoIncrement: true
+                  constraints:
+                    nullable: false
+                    primaryKey: true
+                    primaryKeyName: pk_subject_prompt
+              - column:
+                  name: telegram_user_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: spec_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: name_spec
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: system_prompt
+                  type: TEXT
+              - column:
+                  name: static_text
+                  type: TEXT
+
+        - addUniqueConstraint:
+            tableName: subject_prompt
+            columnNames: telegram_user_id, spec_id
+            constraintName: uq_subject_prompt_user_spec

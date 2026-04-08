@@ -11,42 +11,14 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
 jobs:
-  build-test:
+  build:
+    name: Build
+    permissions:
+      contents: read
+      packages: read
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    services:
-      postgres:
-        image: postgres:18.1-alpine
-        env:
-          POSTGRES_DB: it_top_executor
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d it_top_executor"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-
-    env:
-      DB_URL: jdbc:postgresql://localhost:5432/it_top_executor
-      DB_USERNAME: postgres
-      DB_PASSWORD: postgres
-      KAFKA_BOOTSTRAP_SERVERS: localhost:9092
-      SPRING_KAFKA_LISTENER_AUTO_STARTUP: "false"
-      MISTRALAI_API_KEY: dummy
-      RUSTFS_ACCESS_KEY: dummy
-      RUSTFS_SECRET_KEY: dummy
-      S3_BUCKET: homeworks-solutions
-      S3_ENDPOINT: http://localhost:9000
-      S3_REGION: us-east-1
-      IT_TOP_AI_BASE_URL: http://localhost:8080
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -57,19 +29,68 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-          cache: gradle
 
-      - name: Validate Gradle Wrapper
-        uses: gradle/actions/wrapper-validation@f236b35da9d031e13b1005234ebe4392ed54c580 # v5.0.0
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@f236b35da9d031e13b1005234ebe4392ed54c580 # v5.0.0
 
-      - name: Make Gradle executable
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
+      - name: Compile and package
+        run: ./gradlew assemble -x test --no-daemon
+        env:
+          GPR_USER: ${{ github.actor }}
+          GPR_API_KEY: ${{ secrets.PAT_READ_PACKAGE }}
+
+      - name: Upload compiled JAR
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: app-build
+          path: build/libs/*.jar
+          retention-days: 1
+
+  test:
+    name: Test
+    permissions:
+      contents: read
+      packages: read
+    runs-on: ubuntu-latest
+    needs: [ build ]
+    timeout-minutes: 20
+
+    env:
+      MISTRALAI_API_KEY: dummy
+      GEMINI_API_KEY: dummy
+      S3_ACCESS_KEY: dummy
+      S3_SECRET_KEY: dummy
+      S3_BUCKET: homeworks-solutions
+      S3_ENDPOINT: http://localhost:9000
+      S3_REGION: us-east-1
+      IT_TOP_AI_BASE_URL: http://localhost:8080
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@f236b35da9d031e13b1005234ebe4392ed54c580 # v5.0.0
+
+      - name: Make Gradle wrapper executable
         run: chmod +x gradlew
 
       - name: Run tests
-        run: ./gradlew --no-daemon clean test
-
-      - name: Build bootJar
-        run: ./gradlew --no-daemon bootJar
+        run: ./gradlew test --no-daemon
+        env:
+          GPR_USER: ${{ github.actor }}
+          GPR_API_KEY: ${{ secrets.PAT_READ_PACKAGE }}
 
       - name: Upload test reports on failure
         if: failure()
@@ -79,3 +100,53 @@ jobs:
           path: |
             build/reports/tests/test
             build/test-results/test
+
+  docker-build-push:
+    name: Docker Build and Push
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    needs: [ test ]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download compiled JAR
+        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        with:
+          name: app-build
+          path: build/libs/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893 # v5.9.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/ai-executor
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Build and push image
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

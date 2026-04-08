@@ -1,1 +1,1 @@
-rootProject.name = "it-top-ai-executor"
+rootProject.name = "ai-executor"

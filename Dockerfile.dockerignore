@@ -1,11 +1,26 @@
 # Ignore everything by default
 *
 
-# Include what we need
-!**/src
-!gradle
+# Allow sources
+!src/
+!src/**
+
+# Allow compiled JAR
+!build/libs/*.jar
+
+# Allow Gradle wrapper + build scripts
+!gradlew
+!gradlew.bat
+
+# IMPORTANT: allow directories (parents) explicitly
+!gradle/
+!gradle/wrapper/
+
+# Allow gradle build files
 !**/*.gradle
 !**/*.gradle.kts
 !**/gradle.properties
-!gradlew
-!entrypoint.sh
+!settings.gradle
+!settings.gradle.kts
+!build.gradle
+!build.gradle.kts
