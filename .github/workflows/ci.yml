@@ -38,6 +38,9 @@ jobs:
 
       - name: Compile and package
         run: ./gradlew assemble -x test --no-daemon
+        env:
+          GPR_USER: ${{ github.actor }}
+          GPR_API_KEY: ${{ secrets.PAT_READ_PACKAGE }}
 
       - name: Upload compiled JAR
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
