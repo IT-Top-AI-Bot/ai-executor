@@ -88,6 +88,9 @@ jobs:
 
       - name: Run tests
         run: ./gradlew test --no-daemon
+        env:
+          GPR_USER: ${{ github.actor }}
+          GPR_API_KEY: ${{ secrets.PAT_READ_PACKAGE }}
 
       - name: Upload test reports on failure
         if: failure()
