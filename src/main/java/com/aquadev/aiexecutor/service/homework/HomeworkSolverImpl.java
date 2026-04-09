@@ -44,7 +44,8 @@ public class HomeworkSolverImpl implements HomeworkSolver {
         }
 
         ExtractedDocument extracted = resolveExtraction(request);
-        log.debug("Extracted document: filename={}, textLength={}", request.filename(), extracted.text().length());
+        log.info("Extracted document: filename={}, textLength={}, images={}",
+                request.filename(), extracted.text().length(), extracted.images().size());
 
         String systemPrompt = customPrompt.map(SubjectPrompt::getSystemPrompt).orElse(null);
         if (customPrompt.isPresent()) {

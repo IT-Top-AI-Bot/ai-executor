@@ -6,4 +6,7 @@ public class OcrFailedException extends RuntimeException {
         super(message);
     }
 
+    public OcrFailedException(String message, Throwable cause) {
+        super(message, cause);
+    }
 }

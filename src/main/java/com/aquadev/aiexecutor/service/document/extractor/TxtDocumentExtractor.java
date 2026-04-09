@@ -1,12 +1,14 @@
 package com.aquadev.aiexecutor.service.document.extractor;
 
 import com.aquadev.aiexecutor.dto.ExtractedDocument;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Set;
 
+@Slf4j
 @Component
 public class TxtDocumentExtractor implements DocumentExtractor {
 
@@ -19,7 +21,9 @@ public class TxtDocumentExtractor implements DocumentExtractor {
 
     @Override
     public ExtractedDocument extract(byte[] content, String filename) {
+        log.info("Extracting plain text: filename={}, size={} bytes", filename, content.length);
         String text = new String(content, StandardCharsets.UTF_8);
+        log.info("Plain text extracted: filename={}, textLength={}", filename, text.length());
         return new ExtractedDocument(text, Map.of("source", filename));
     }
 }

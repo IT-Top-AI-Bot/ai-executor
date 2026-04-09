@@ -11,7 +11,6 @@ import org.springframework.ai.mistralai.ocr.MistralOcrApi.OCRRequest;
 import org.springframework.ai.mistralai.ocr.MistralOcrApi.OCRRequest.DocumentURLChunk;
 import org.springframework.ai.mistralai.ocr.MistralOcrApi.OCRResponse;
 import org.springframework.core.io.ByteArrayResource;
-import org.springframework.stereotype.Service;
 import org.springframework.util.MimeType;
 import org.springframework.util.MimeTypeUtils;
 
@@ -21,7 +20,6 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Slf4j
-@Service
 @RequiredArgsConstructor
 public class MistralOcrService implements OcrService {
 
@@ -69,7 +67,7 @@ public class MistralOcrService implements OcrService {
                 .mapToInt(img -> {
                     try {
                         return img.getDataAsByteArray().length;
-                    } catch (Exception e) {
+                    } catch (Exception _) {
                         return 0;
                     }
                 }).sum();

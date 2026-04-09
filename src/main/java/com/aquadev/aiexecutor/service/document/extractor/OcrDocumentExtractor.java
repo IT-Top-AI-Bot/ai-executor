@@ -53,7 +53,7 @@ public class OcrDocumentExtractor implements DocumentExtractor {
             Map.entry("heif", "image/heif")
     );
 
-    private final OcrService mistralOcrService;
+    private final OcrService ocrService;
 
     @Override
     public Set<String> supportedMimeTypes() {
@@ -67,11 +67,11 @@ public class OcrDocumentExtractor implements DocumentExtractor {
                 : "";
         String mimeType = EXTENSION_TO_MIME.getOrDefault(ext, "application/octet-stream");
 
-        log.debug("Extracting via OCR: filename={}, mimeType={}", filename, mimeType);
+        log.info("Extracting via OCR: filename={}, mimeType={}, size={} bytes", filename, mimeType, content.length);
 
-        OcrService.OcrResult ocr = mistralOcrService.extract(content, mimeType);
+        OcrService.OcrResult ocr = ocrService.extract(content, mimeType);
 
-        log.debug("OCR completed: filename={}, textLength={}, images={}", filename, ocr.text().length(), ocr.images().size());
+        log.info("OCR completed: filename={}, textLength={}, images={}", filename, ocr.text().length(), ocr.images().size());
         return new ExtractedDocument(ocr.text().trim(), Map.of("source", filename), ocr.images());
     }
 }

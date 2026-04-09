@@ -49,7 +49,7 @@ val springCloudVersion by extra("2025.1.1")
 val springCloudAwsVersion by extra("4.0.0")
 val imageIoVersion by extra("1.4.0")
 val resilience4jVersion by extra("2.4.0")
-val opentelemetryVersion by extra("2.26.1-alpha")
+val opentelemetryVersion by extra("2.21.0-alpha")
 
 dependencies {
     implementation("com.aquadev:common-libs:$commonLibsVersion")
