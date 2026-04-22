@@ -28,8 +28,6 @@ configurations {
     }
 }
 
-val commonLibsVersion by extra("1.2.0")
-
 repositories {
     mavenLocal()
     mavenCentral()
@@ -44,6 +42,7 @@ repositories {
     }
 }
 
+val commonLibsVersion by extra("1.3.0")
 val springAiVersion by extra("2.0.0-M4")
 val springCloudVersion by extra("2025.1.1")
 val springCloudAwsVersion by extra("4.0.0")
