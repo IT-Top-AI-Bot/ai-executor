@@ -41,6 +41,8 @@ public class GeminiSolveStrategy implements AiSolveStrategy {
     public SolvedHomework executeSolveRequest(String systemPrompt, String userMessage, List<Media> images) {
         var options = GoogleGenAiChatOptions.builder()
                 .model(model)
+                .temperature(0.8)
+                .topP(0.9)
                 .responseMimeType(MediaType.APPLICATION_JSON_VALUE)
                 .responseSchema(outputConverter.getJsonSchema())
                 .build();

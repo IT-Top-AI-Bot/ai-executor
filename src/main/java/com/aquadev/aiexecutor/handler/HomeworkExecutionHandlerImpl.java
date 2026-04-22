@@ -61,7 +61,7 @@ public class HomeworkExecutionHandlerImpl implements HomeworkExecutionHandler {
             String uploadedKey = s3UploadService.upload(fileBytes, s3Key, contentType);
             log.info("Uploaded to S3: key={}", uploadedKey);
 
-            homeworkResultProducer.sendCompleted(event.id(), uploadedKey);
+            homeworkResultProducer.sendCompleted(event.id(), uploadedKey, outputFilename);
             log.info("Result sent for executionId={}", event.id());
 
         } catch (Exception ex) {
