@@ -21,8 +21,8 @@ public class HomeworkResultProducer {
     private final KafkaTopicProperties kafkaTopicProperties;
     private final KafkaTemplate<String, HomeworkExecutionResultEvent> resultKafkaTemplate;
 
-    public void sendCompleted(UUID executionId, String s3Key) {
-        send(executionId, HomeworkExecutionResultEvent.completed(executionId, s3Key));
+    public void sendCompleted(UUID executionId, String s3Key, String resultFilename) {
+        send(executionId, HomeworkExecutionResultEvent.completed(executionId, s3Key, resultFilename));
     }
 
     public void sendCompletedText(UUID executionId, String text) {
