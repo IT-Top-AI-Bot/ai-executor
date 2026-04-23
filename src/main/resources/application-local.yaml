@@ -20,3 +20,7 @@ ai:
   default-provider: GEMINI
   fallback-providers:
     - MISTRAL
+
+homework:
+  download:
+    allowed-hosts: localhost,127.0.0.1,*.top-academy.ru,s3.actimate.ru
