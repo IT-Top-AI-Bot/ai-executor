@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ "master", "main" ]
+    branches: [ "master", "main", "prod" ]
   pull_request:
-    branches: [ "master", "main" ]
+    branches: [ "master", "main", "prod" ]
   workflow_dispatch:
 
 concurrency:
@@ -107,7 +107,7 @@ jobs:
       contents: read
       packages: write
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/prod') && github.event_name == 'push'
     needs: [ test ]
     timeout-minutes: 30
 
@@ -137,8 +137,10 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/ai-executor
           tags: |
-            type=raw,value=latest
-            type=sha,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+            type=sha,format=short,enable=${{ github.ref == 'refs/heads/master' }}
+            type=raw,value=prod-latest,enable=${{ github.ref == 'refs/heads/prod' }}
+            type=sha,format=short,prefix=prod-,enable=${{ github.ref == 'refs/heads/prod' }}
 
       - name: Build and push image
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
